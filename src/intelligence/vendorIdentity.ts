@@ -65,10 +65,12 @@ export function cleanSenderName(senderName: string | null): string | null {
   }
 
   const cleaned = senderName
-    .replace(/^['"]|['"]$/g, "")
-    .replace(/\b(no[- ]?reply|do[- ]?not[- ]?reply|donotreply)\b/gi, "")
     .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[\[\]\(\)<>]/g, " ")
+    .replace(/^['"]+|['"]+$/g, "")
+    .replace(/\b(no[- ]?reply|do[- ]?not[- ]?reply|donotreply)\b/gi, "")
     .replace(/[<>]/g, " ")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 

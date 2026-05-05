@@ -1,6 +1,7 @@
 import express from "express";
 import { Category } from "@prisma/client";
 import { prisma } from "../db";
+import { buildSenderInsights } from "../intelligence/senderInsights";
 
 function escapeHtml(value: string | null | undefined): string {
   return (value ?? "")
@@ -394,8 +395,8 @@ function renderPage(title: string, body: string): string {
             </div>
           </div>
         </div>
-        <h1>${escapeHtml(title)}</h1>
         <nav>
+          <a href="/">Overview</a>
           <a href="/emails">Emails</a>
           <a href="/senders">Senders</a>
           <a href="/subscriptions">Subscriptions</a>
@@ -411,11 +412,167 @@ function renderPage(title: string, body: string): string {
   </html>`;
 }
 
+function scoreClass(score: number): string {
+  if (score >= 75) {
+    return "score-high";
+  }
+
+  if (score >= 45) {
+    return "score-medium";
+  }
+
+  return "score-low";
+}
+
 export function createWebServer() {
   const app = express();
 
-  app.get("/", (_req, res) => {
-    res.redirect("/emails");
+  app.get("/", async (_req, res) => {
+    const [
+      emailCount,
+      senderCount,
+      subscriptionCount,
+      alertCount,
+      urgentEmailCount,
+      opportunityEmailCount,
+      recentAlerts,
+      upcomingRenewals,
+      topSenders,
+      highSignalEmails
+    ] = await Promise.all([
+      prisma.email.count(),
+      prisma.sender.count(),
+      prisma.subscription.count(),
+      prisma.alert.count(),
+      prisma.classification.count({
+        where: {
+          urgencyScore: { gte: 75 }
+        }
+      }),
+      prisma.classification.count({
+        where: {
+          opportunityScore: { gte: 75 }
+        }
+      }),
+      prisma.alert.findMany({
+        include: { email: true },
+        orderBy: { createdAt: "desc" },
+        take: 6
+      }),
+      prisma.subscription.findMany({
+        orderBy: [{ nextRenewalAt: "asc" }, { updatedAt: "desc" }],
+        take: 6
+      }),
+      prisma.sender.findMany({
+        include: {
+          emails: {
+            include: { classification: true },
+            orderBy: { receivedAt: "desc" },
+            take: 20
+          }
+        },
+        orderBy: { emailCount: "desc" },
+        take: 5
+      }),
+      prisma.email.findMany({
+        include: { classification: true },
+        where: {
+          OR: [
+            { classification: { urgencyScore: { gte: 75 } } },
+            { classification: { opportunityScore: { gte: 75 } } }
+          ]
+        },
+        orderBy: { receivedAt: "desc" },
+        take: 8
+      })
+    ]);
+
+    const alertItems = recentAlerts
+      .map(
+        (alert) =>
+          `<li><a href="/emails/${alert.emailId}">${escapeHtml(alert.email.subject ?? "(no subject)")}</a> · ${escapeHtml(alert.type)} · ${escapeHtml(alert.reason)}</li>`
+      )
+      .join("");
+
+    const renewalRows = upcomingRenewals
+      .map(
+        (subscription) => `<tr>
+          <td>${escapeHtml(subscription.vendor)}</td>
+          <td>${subscription.amount?.toString() ?? "n/a"}</td>
+          <td>${formatDate(subscription.nextRenewalAt)}</td>
+          <td>${renderCategoryPill(subscription.status)}</td>
+        </tr>`
+      )
+      .join("");
+
+    const senderRows = topSenders
+      .map((sender) => {
+        const insights = buildSenderInsights(sender.emails);
+        return `<tr>
+          <td><a href="/senders/${sender.id}">${escapeHtml(sender.name ?? sender.email)}</a></td>
+          <td>${escapeHtml(sender.domain)}</td>
+          <td>${sender.emailCount}</td>
+          <td>${renderCategoryPill(insights.dominantCategory)}</td>
+          <td><span class="score ${scoreClass(insights.maxUrgency)}">${insights.maxUrgency}</span></td>
+        </tr>`;
+      })
+      .join("");
+
+    const emailRows = highSignalEmails
+      .map((email) => {
+        const urgency = email.classification?.urgencyScore ?? 0;
+        const opportunity = email.classification?.opportunityScore ?? 0;
+        return `<tr>
+          <td><a href="/emails/${email.id}">${escapeHtml(email.subject ?? "(no subject)")}</a></td>
+          <td>${escapeHtml(email.senderEmail ?? email.senderRaw ?? "unknown")}</td>
+          <td>${renderCategoryPill(email.classification?.category ?? "UNKNOWN")}</td>
+          <td><span class="score ${scoreClass(urgency)}">${urgency}</span></td>
+          <td><span class="score ${scoreClass(opportunity)}">${opportunity}</span></td>
+        </tr>`;
+      })
+      .join("");
+
+    res.send(
+      renderPage(
+        "InboxIntel Overview",
+        `${renderHero("Inbox overview", "See urgent alerts, upcoming renewals, top recurring senders, and the most important signals across your mailbox in one place.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Emails</div><div class="summary-value">${emailCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Senders</div><div class="summary-value">${senderCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Subscriptions</div><div class="summary-value">${subscriptionCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Alerts</div><div class="summary-value">${alertCount}</div></div>
+          <div class="summary-card"><div class="summary-label">High Urgency</div><div class="summary-value">${urgentEmailCount}</div></div>
+          <div class="summary-card"><div class="summary-label">High Opportunity</div><div class="summary-value">${opportunityEmailCount}</div></div>
+        </section>
+        <div class="grid">
+          <section>
+            <h3 class="section-title">Recent alerts</h3>
+            <ul>${alertItems || "<li>No alerts yet.</li>"}</ul>
+          </section>
+          <section>
+            <h3 class="section-title">Upcoming renewals</h3>
+            <table>
+              <thead><tr><th>Vendor</th><th>Amount</th><th>Due Date</th><th>Status</th></tr></thead>
+              <tbody>${renewalRows || '<tr><td colspan="4">No subscriptions yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3 class="section-title">Top senders</h3>
+            <table>
+              <thead><tr><th>Sender</th><th>Domain</th><th>Emails</th><th>Dominant Category</th><th>Peak Urgency</th></tr></thead>
+              <tbody>${senderRows || '<tr><td colspan="5">No senders yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3 class="section-title">High-signal recent emails</h3>
+            <table>
+              <thead><tr><th>Subject</th><th>Sender</th><th>Category</th><th>Urgency</th><th>Opportunity</th></tr></thead>
+              <tbody>${emailRows || '<tr><td colspan="5">No high-signal emails yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+        </div>`
+      )
+    );
   });
 
   app.get("/health", async (_req, res) => {
@@ -600,7 +757,11 @@ export function createWebServer() {
         emails: {
           include: {
             classification: true
-          }
+          },
+          orderBy: {
+            receivedAt: "desc"
+          },
+          take: 25
         }
       },
       orderBy: {
@@ -611,20 +772,17 @@ export function createWebServer() {
 
     const rows = senders
       .map((sender) => {
-        const counts = new Map<string, number>();
-        for (const email of sender.emails) {
-          const category = email.classification?.category ?? "UNKNOWN";
-          counts.set(category, (counts.get(category) ?? 0) + 1);
-        }
-        const dominantCategory =
-          Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "UNKNOWN";
+        const insights = buildSenderInsights(sender.emails);
 
         return `<tr>
-          <td>${escapeHtml(sender.name ?? "")}</td>
+          <td><a href="/senders/${sender.id}">${escapeHtml(sender.name ?? sender.email)}</a></td>
           <td>${escapeHtml(sender.email)}</td>
           <td>${escapeHtml(sender.domain)}</td>
           <td>${sender.emailCount}</td>
-          <td>${renderCategoryPill(dominantCategory)}</td>
+          <td>${renderCategoryPill(insights.dominantCategory)}</td>
+          <td><span class="score ${scoreClass(insights.averageUrgency)}">${insights.averageUrgency}</span></td>
+          <td><span class="score ${scoreClass(insights.averageOpportunity)}">${insights.averageOpportunity}</span></td>
+          <td>${formatDate(insights.lastSeenAt)}</td>
         </tr>`;
       })
       .join("");
@@ -636,15 +794,99 @@ export function createWebServer() {
         <table>
           <thead>
             <tr>
-              <th>Name</th>
+              <th>Sender</th>
               <th>Email</th>
               <th>Domain</th>
               <th>Email Count</th>
               <th>Dominant Category</th>
+              <th>Avg Urgency</th>
+              <th>Avg Opportunity</th>
+              <th>Last Seen</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="5">No senders yet.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="8">No senders yet.</td></tr>'}</tbody>
         </table>`
+      )
+    );
+  });
+
+  app.get("/senders/:id", async (req, res) => {
+    const sender = await prisma.sender.findUnique({
+      where: { id: req.params.id },
+      include: {
+        subscriptions: {
+          orderBy: [{ nextRenewalAt: "asc" }, { updatedAt: "desc" }]
+        },
+        emails: {
+          include: {
+            classification: true
+          },
+          orderBy: {
+            receivedAt: "desc"
+          },
+          take: 50
+        }
+      }
+    });
+
+    if (!sender) {
+      res.status(404).send(renderPage("Sender Not Found", "<p>Sender not found.</p>"));
+      return;
+    }
+
+    const insights = buildSenderInsights(sender.emails);
+
+    const subscriptionItems = sender.subscriptions
+      .map(
+        (subscription) => `<li>${escapeHtml(subscription.vendor)} · ${subscription.amount?.toString() ?? "n/a"} · ${formatDate(subscription.nextRenewalAt)} · ${renderCategoryPill(subscription.status)}</li>`
+      )
+      .join("");
+
+    const emailRows = sender.emails
+      .map((email) => {
+        const urgency = email.classification?.urgencyScore ?? 0;
+        const opportunity = email.classification?.opportunityScore ?? 0;
+        return `<tr>
+          <td><a href="/emails/${email.id}">${escapeHtml(email.subject ?? "(no subject)")}</a></td>
+          <td>${renderCategoryPill(email.classification?.category ?? "UNKNOWN")}</td>
+          <td><span class="score ${scoreClass(urgency)}">${urgency}</span></td>
+          <td><span class="score ${scoreClass(opportunity)}">${opportunity}</span></td>
+          <td>${formatDate(email.receivedAt)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    res.send(
+      renderPage(
+        `${sender.name ?? sender.email}`,
+        `${renderHero("Sender profile", "Drill into one sender's classification history, peak risk, recurring subscriptions, and recent activity.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Email Count</div><div class="summary-value">${sender.emailCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Dominant Category</div><div class="summary-value">${escapeHtml(insights.dominantCategory)}</div></div>
+          <div class="summary-card"><div class="summary-label">Avg Urgency</div><div class="summary-value">${insights.averageUrgency}</div></div>
+          <div class="summary-card"><div class="summary-label">Avg Opportunity</div><div class="summary-value">${insights.averageOpportunity}</div></div>
+        </section>
+        <div class="grid">
+          <section>
+            <h3 class="section-title">Sender details</h3>
+            <p><strong>Name:</strong> ${escapeHtml(sender.name ?? "unknown")}</p>
+            <p><strong>Email:</strong> ${escapeHtml(sender.email)}</p>
+            <p><strong>Domain:</strong> ${escapeHtml(sender.domain)}</p>
+            <p><strong>Last seen:</strong> ${formatDate(insights.lastSeenAt)}</p>
+            <p><strong>Average confidence:</strong> ${insights.averageConfidence}</p>
+          </section>
+          <section>
+            <h3 class="section-title">Tracked subscriptions</h3>
+            <ul>${subscriptionItems || "<li>No subscriptions linked to this sender.</li>"}</ul>
+          </section>
+          <section>
+            <h3 class="section-title">Recent email history</h3>
+            <table>
+              <thead><tr><th>Subject</th><th>Category</th><th>Urgency</th><th>Opportunity</th><th>Received</th></tr></thead>
+              <tbody>${emailRows || '<tr><td colspan="5">No emails for this sender yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+        </div>`
       )
     );
   });
