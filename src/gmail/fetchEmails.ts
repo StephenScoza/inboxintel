@@ -2,6 +2,7 @@ import { gmail_v1 } from "googleapis";
 import { config } from "../config";
 
 export interface GmailMessagePage {
+  historyId?: string;
   nextPageToken?: string;
   messages: gmail_v1.Schema$Message[];
 }
@@ -10,6 +11,26 @@ interface FetchOptions {
   maxPages?: number;
   pageSize?: number;
   query?: string;
+}
+
+export class GmailHistoryExpiredError extends Error {
+  constructor(startHistoryId: string) {
+    super(`Gmail history ${startHistoryId} is no longer available. Falling back to a full sync is required.`);
+    this.name = "GmailHistoryExpiredError";
+  }
+}
+
+async function fetchFullMessage(
+  gmail: gmail_v1.Gmail,
+  messageId: string
+): Promise<gmail_v1.Schema$Message | null> {
+  const fullResponse = await gmail.users.messages.get({
+    userId: "me",
+    id: messageId,
+    format: "full"
+  });
+
+  return fullResponse.data.id ? fullResponse.data : null;
 }
 
 export async function *fetchEmailsInPages(
@@ -37,14 +58,9 @@ export async function *fetchEmailsInPages(
         continue;
       }
 
-      const fullResponse = await gmail.users.messages.get({
-        userId: "me",
-        id: messageRef.id,
-        format: "full"
-      });
-
-      if (fullResponse.data.id) {
-        fullMessages.push(fullResponse.data);
+      const fullMessage = await fetchFullMessage(gmail, messageRef.id);
+      if (fullMessage) {
+        fullMessages.push(fullMessage);
       }
     }
 
@@ -58,3 +74,61 @@ export async function *fetchEmailsInPages(
   } while (pageToken && (!options.maxPages || pageCount < options.maxPages));
 }
 
+export async function *fetchHistoryInPages(
+  gmail: gmail_v1.Gmail,
+  startHistoryId: string,
+  options: Omit<FetchOptions, "query"> = {}
+): AsyncGenerator<GmailMessagePage> {
+  const pageSize = options.pageSize ?? config.gmailPageSize;
+  let pageToken: string | undefined;
+  let pageCount = 0;
+
+  do {
+    let historyResponse;
+
+    try {
+      historyResponse = await gmail.users.history.list({
+        userId: "me",
+        startHistoryId,
+        maxResults: pageSize,
+        pageToken,
+        historyTypes: ["messageAdded"]
+      });
+    } catch (error) {
+      const status = (error as { code?: number; status?: number }).code
+        ?? (error as { code?: number; status?: number }).status;
+
+      if (status === 404) {
+        throw new GmailHistoryExpiredError(startHistoryId);
+      }
+
+      throw error;
+    }
+
+    const messageIds = new Set<string>();
+    for (const historyRecord of historyResponse.data.history ?? []) {
+      for (const added of historyRecord.messagesAdded ?? []) {
+        if (added.message?.id) {
+          messageIds.add(added.message.id);
+        }
+      }
+    }
+
+    const messages: gmail_v1.Schema$Message[] = [];
+    for (const messageId of messageIds) {
+      const fullMessage = await fetchFullMessage(gmail, messageId);
+      if (fullMessage) {
+        messages.push(fullMessage);
+      }
+    }
+
+    yield {
+      historyId: historyResponse.data.historyId ?? undefined,
+      nextPageToken: historyResponse.data.nextPageToken ?? undefined,
+      messages
+    };
+
+    pageToken = historyResponse.data.nextPageToken ?? undefined;
+    pageCount += 1;
+  } while (pageToken && (!options.maxPages || pageCount < options.maxPages));
+}

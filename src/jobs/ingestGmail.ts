@@ -1,6 +1,11 @@
 import { prisma } from "../db";
 import { config } from "../config";
-import { fetchEmailsInPages } from "../gmail/fetchEmails";
+import {
+  fetchEmailsInPages,
+  fetchHistoryInPages,
+  GmailMessagePage,
+  GmailHistoryExpiredError
+} from "../gmail/fetchEmails";
 import { getAuthorizedGmailClient } from "../gmail/client";
 import { processEmail } from "./processEmail";
 
@@ -10,11 +15,14 @@ function sleep(ms: number) {
 
 export async function runIngestOnce(maxPages?: number) {
   const client = await getAuthorizedGmailClient();
+  const existingAccount = await prisma.gmailAccount.findUnique({
+    where: { email: client.emailAddress }
+  });
+
   const account = await prisma.gmailAccount.upsert({
     where: { email: client.emailAddress },
     update: {
       tokenPath: client.tokenPath,
-      historyId: client.historyId,
       lastSyncedAt: new Date()
     },
     create: {
@@ -27,33 +35,59 @@ export async function runIngestOnce(maxPages?: number) {
 
   let processed = 0;
   let duplicates = 0;
+  let latestHistoryId = client.historyId ?? existingAccount?.historyId ?? account.historyId;
+  let usedIncrementalSync = false;
 
-  for await (const page of fetchEmailsInPages(client.gmail, { maxPages })) {
-    for (const message of page.messages) {
-      const result = await processEmail(message, {
-        gmailAccountId: account.id,
-        gmailAccountEmail: account.email
-      });
-
-      if (result.skipped) {
-        if (result.reason === "duplicate") {
-          duplicates += 1;
-        }
-        continue;
+  const processPages = async (pages: AsyncGenerator<GmailMessagePage>) => {
+    for await (const page of pages) {
+      if (page.historyId) {
+        latestHistoryId = page.historyId;
       }
 
-      processed += 1;
+      for (const message of page.messages) {
+        const result = await processEmail(message, {
+          gmailAccountId: account.id,
+          gmailAccountEmail: account.email
+        });
+
+        if (result.skipped) {
+          if (result.reason === "duplicate") {
+            duplicates += 1;
+          }
+          continue;
+        }
+
+        processed += 1;
+      }
     }
+  };
+
+  try {
+    if (existingAccount?.historyId) {
+      usedIncrementalSync = true;
+      await processPages(fetchHistoryInPages(client.gmail, existingAccount.historyId, { maxPages }));
+    } else {
+      await processPages(fetchEmailsInPages(client.gmail, { maxPages }));
+    }
+  } catch (error) {
+    if (!(error instanceof GmailHistoryExpiredError)) {
+      throw error;
+    }
+
+    usedIncrementalSync = false;
+    await processPages(fetchEmailsInPages(client.gmail, { maxPages }));
   }
 
   await prisma.gmailAccount.update({
     where: { id: account.id },
     data: {
+      historyId: latestHistoryId,
       lastSyncedAt: new Date()
     }
   });
 
-  console.log(`Ingest complete. New emails: ${processed}. Duplicates skipped: ${duplicates}.`);
+  const modeLabel = usedIncrementalSync ? "incremental history sync" : "full mailbox sync";
+  console.log(`Ingest complete via ${modeLabel}. New emails: ${processed}. Duplicates skipped: ${duplicates}.`);
 }
 
 async function runWorkerLoop(maxPages?: number) {
@@ -86,4 +120,3 @@ if (require.main === module) {
       }
     });
 }
-
