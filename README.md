@@ -35,7 +35,7 @@ InboxIntel V1 is strictly read-only.
 2. Create an `OAuth client ID`.
 3. Choose `Web application`.
 4. Add this redirect URI for local development:
-   - `http://localhost:3000/oauth2callback`
+   - `http://localhost:3217/oauth2callback`
 5. Copy the client ID and client secret into your `.env`.
 
 InboxIntel only uses this Gmail scope:
@@ -51,8 +51,16 @@ InboxIntel only uses this Gmail scope:
    - `GOOGLE_CLIENT_SECRET`
    - `GOOGLE_REDIRECT_URI`
    - Discord webhook URLs
+   - optional host port overrides like `PORT` and `POSTGRES_HOST_PORT`
 
 If you do not want a given alert channel yet, you can leave that webhook blank.
+
+Default local ports are intentionally project-specific so InboxIntel can live alongside other apps:
+
+- Web app: `3217`
+- Postgres host port: `55432`
+
+You can change either one in `.env`.
 
 ## 4. Run Docker
 
@@ -62,7 +70,7 @@ Start Postgres and the app:
 docker compose up --build
 ```
 
-The dashboard will be available at [http://localhost:3000](http://localhost:3000).
+The dashboard will be available at [http://localhost:3217](http://localhost:3217) by default.
 
 ## 5. Run Prisma migrations
 
@@ -91,7 +99,7 @@ What happens:
 1. InboxIntel prints a Google consent URL.
 2. Open the URL in your browser.
 3. Sign in to the Gmail account you want InboxIntel to read.
-4. Google redirects back to `http://localhost:3000/oauth2callback`.
+4. Google redirects back to `http://localhost:3217/oauth2callback` by default.
 5. Copy the full redirected URL from the browser and paste it into the terminal prompt.
 6. InboxIntel stores the token JSON in the local `tokens/` directory.
 

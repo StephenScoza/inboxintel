@@ -23,11 +23,11 @@ export function requireEnv(name: string): string {
 
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
-  port: parseNumber(process.env.PORT, 3000),
+  port: parseNumber(process.env.PORT, 3217),
   databaseUrl: requireEnv("DATABASE_URL"),
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/oauth2callback",
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3217/oauth2callback",
   discordRenewalsWebhook: process.env.DISCORD_RENEWALS_WEBHOOK ?? "",
   discordTrialsWebhook: process.env.DISCORD_TRIALS_WEBHOOK ?? "",
   discordMoneyLeaksWebhook: process.env.DISCORD_MONEY_LEAKS_WEBHOOK ?? "",
@@ -36,7 +36,7 @@ export const config = {
   gmailPageSize: parseNumber(process.env.GMAIL_PAGE_SIZE, 25),
   gmailPollIntervalMs: parseNumber(process.env.GMAIL_POLL_INTERVAL_MS, 300_000),
   tokensDir: path.resolve(process.cwd(), "tokens"),
-  webBaseUrl: process.env.WEB_BASE_URL ?? `http://localhost:${parseNumber(process.env.PORT, 3000)}`
+  webBaseUrl: process.env.WEB_BASE_URL ?? `http://localhost:${parseNumber(process.env.PORT, 3217)}`
 };
 
 export function ensureGoogleConfig(): void {
@@ -44,4 +44,3 @@ export function ensureGoogleConfig(): void {
   requireEnv("GOOGLE_CLIENT_SECRET");
   requireEnv("GOOGLE_REDIRECT_URI");
 }
-
