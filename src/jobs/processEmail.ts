@@ -1,19 +1,16 @@
 import { AlertType, Category, Prisma } from "@prisma/client";
 import { gmail_v1 } from "googleapis";
 import { sendDiscordAlert } from "../alerts/discord";
-import { classifyEmail } from "../classifier/classifyEmail";
 import { prisma } from "../db";
+import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
 import {
   chooseImportantDate,
   chooseSubscriptionAmount,
   determineSubscriptionStatus,
   shouldTrackSubscription
 } from "../intelligence/subscriptionFacts";
-import { extractAmounts } from "../parser/extractAmounts";
 import { extractBody } from "../parser/extractBody";
-import { extractDates } from "../parser/extractDates";
 import { extractLinks } from "../parser/extractLinks";
-import { extractSignals } from "../parser/extractSignals";
 
 function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | null {
   const header = headers?.find((entry) => entry.name?.toLowerCase() === name.toLowerCase());
@@ -96,29 +93,15 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
       ? new Date(receivedHeader)
       : null;
   const { plainTextBody, htmlBody } = extractBody(payload);
-  const combinedText = [subject, message.snippet, plainTextBody].filter(Boolean).join("\n");
   const links = extractLinks(plainTextBody, htmlBody);
-  const amounts = extractAmounts(combinedText);
-  const dates = extractDates(combinedText);
-  const signals = extractSignals({
-    subject,
-    snippet: message.snippet ?? null,
-    plainTextBody,
-    htmlBody,
-    labels: message.labelIds ?? [],
-    links
-  });
-  const classification = classifyEmail({
+  const intelligence = buildEmailIntelligence({
     subject,
     snippet: message.snippet ?? null,
     plainTextBody,
     htmlBody,
     labels: message.labelIds ?? [],
     senderDomain: senderMeta.senderDomain,
-    links,
-    amounts,
-    dates,
-    signals
+    links
   });
 
   const sender = senderMeta.senderEmail
@@ -154,8 +137,8 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
       plainTextBody,
       htmlBody,
       rawPayload: payload as unknown as Prisma.InputJsonValue,
-      amountsJson: amounts as unknown as Prisma.InputJsonValue,
-      datesJson: dates as unknown as Prisma.InputJsonValue,
+      amountsJson: intelligence.amounts as unknown as Prisma.InputJsonValue,
+      datesJson: intelligence.dates as unknown as Prisma.InputJsonValue,
       gmailAccountId: context.gmailAccountId,
       senderId: sender?.id ?? null,
       links: {
@@ -167,12 +150,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
       },
       classification: {
         create: {
-          category: classification.category,
-          confidence: classification.confidence,
-          urgencyScore: classification.urgencyScore,
-          opportunityScore: classification.opportunityScore,
-          reasons: classification.reasons,
-          signalsJson: classification.signals as unknown as Prisma.InputJsonValue
+          category: intelligence.classification.category,
+          confidence: intelligence.classification.confidence,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
+          reasons: intelligence.classification.reasons,
+          signalsJson: intelligence.classification.signals as unknown as Prisma.InputJsonValue
         }
       }
     },
@@ -181,14 +164,14 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     }
   });
 
-  if (shouldTrackSubscription(classification.category, signals)) {
+  if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
     const vendor = deriveVendor(senderMeta.senderName, senderMeta.senderDomain);
-    const primaryAmount = chooseSubscriptionAmount(amounts);
-    const primaryDate = chooseImportantDate(dates, classification.category);
+    const primaryAmount = chooseSubscriptionAmount(intelligence.amounts);
+    const primaryDate = chooseImportantDate(intelligence.dates, intelligence.classification.category);
     const primaryDateIso = primaryDate?.iso ?? null;
-    const status = determineSubscriptionStatus(classification.category, primaryDateIso);
+    const status = determineSubscriptionStatus(intelligence.classification.category, primaryDateIso);
     const notes = [
-      ...classification.reasons,
+      ...intelligence.classification.reasons,
       primaryAmount ? `amount-kind=${primaryAmount.kind}` : null,
       primaryDate ? `date-kind=${primaryDate.kind}` : null
     ]
@@ -209,8 +192,8 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         currency: primaryAmount?.currency ?? undefined,
         nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : undefined,
         status,
-        confidence: classification.confidence,
-        sourceCategory: classification.category,
+        confidence: intelligence.classification.confidence,
+        sourceCategory: intelligence.classification.category,
         lastSeenAt: receivedAt ?? new Date(),
         notes
       },
@@ -223,8 +206,8 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         currency: primaryAmount?.currency ?? "USD",
         nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : null,
         status,
-        confidence: classification.confidence,
-        sourceCategory: classification.category,
+        confidence: intelligence.classification.confidence,
+        sourceCategory: intelligence.classification.category,
         lastSeenAt: receivedAt ?? new Date(),
         notes
       }
@@ -232,11 +215,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   }
 
   const alertTypes = Array.from(new Set([
-    ...classification.alertTypes,
-    ...shouldPromoteHighOpportunity(classification.category, classification.opportunityScore)
+    ...intelligence.classification.alertTypes,
+    ...shouldPromoteHighOpportunity(intelligence.classification.category, intelligence.classification.opportunityScore)
   ]));
-  const primaryAmount = chooseSubscriptionAmount(amounts) ?? amounts[0] ?? null;
-  const primaryDate = chooseImportantDate(dates, classification.category) ?? dates[0] ?? null;
+  const primaryAmount = chooseSubscriptionAmount(intelligence.amounts) ?? intelligence.amounts[0] ?? null;
+  const primaryDate =
+    chooseImportantDate(intelligence.dates, intelligence.classification.category) ?? intelligence.dates[0] ?? null;
   const primaryAmountLabel = primaryAmount ? `${primaryAmount.currency} ${primaryAmount.value.toFixed(2)}` : null;
   const primaryDateIso = primaryDate?.iso ?? null;
 
@@ -244,13 +228,13 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     try {
       const delivery = await sendDiscordAlert({
         alertType,
-        category: classification.category,
+        category: intelligence.classification.category,
         subject,
         sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
-        reason: classification.reasons[0] ?? "Alert-worthy email",
-        urgencyScore: classification.urgencyScore,
-        opportunityScore: classification.opportunityScore,
-        confidence: classification.confidence,
+        reason: intelligence.classification.reasons[0] ?? "Alert-worthy email",
+        urgencyScore: intelligence.classification.urgencyScore,
+        opportunityScore: intelligence.classification.opportunityScore,
+        confidence: intelligence.classification.confidence,
         detectedAmount: primaryAmountLabel,
         detectedDate: primaryDateIso,
         gmailAccountEmail: context.gmailAccountEmail,
@@ -262,10 +246,10 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           emailId: email.id,
           gmailAccountId: context.gmailAccountId,
           type: alertType,
-          category: classification.category,
-          reason: classification.reasons[0] ?? "Alert-worthy email",
-          urgencyScore: classification.urgencyScore,
-          opportunityScore: classification.opportunityScore,
+          category: intelligence.classification.category,
+          reason: intelligence.classification.reasons[0] ?? "Alert-worthy email",
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
           payloadJson: delivery.payloadJson as unknown as Prisma.InputJsonValue
@@ -277,10 +261,10 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           emailId: email.id,
           gmailAccountId: context.gmailAccountId,
           type: alertType,
-          category: classification.category,
-          reason: `${classification.reasons[0] ?? "Alert-worthy email"} (delivery failed)`,
-          urgencyScore: classification.urgencyScore,
-          opportunityScore: classification.opportunityScore,
+          category: intelligence.classification.category,
+          reason: `${intelligence.classification.reasons[0] ?? "Alert-worthy email"} (delivery failed)`,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: "delivery-failed",
           payloadJson: {
             error: error instanceof Error ? error.message : "Unknown delivery error"

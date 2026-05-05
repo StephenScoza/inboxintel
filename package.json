@@ -13,7 +13,8 @@
     "prisma:studio": "prisma studio",
     "gmail:auth": "tsx src/gmail/auth.ts",
     "ingest": "tsx src/jobs/ingestGmail.ts",
-    "worker": "tsx src/jobs/ingestGmail.ts --loop"
+    "worker": "tsx src/jobs/ingestGmail.ts --loop",
+    "reprocess": "tsx src/jobs/reprocessEmails.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.8.2",

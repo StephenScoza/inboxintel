@@ -113,6 +113,20 @@ docker compose exec app npm run worker
 
 The worker periodically fetches Gmail messages in pages, stores new emails, classifies them, updates subscriptions, and writes alerts.
 
+If you improve the deterministic rules and want to re-run them against emails already stored in Postgres without calling Gmail again:
+
+```bash
+docker compose exec app npm run reprocess
+```
+
+You can also reprocess a limited slice while tuning:
+
+```bash
+docker compose exec app npm run reprocess -- --limit=100
+```
+
+The reprocess job refreshes stored extracted amounts, extracted dates, classifications, subscription facts, and creates any newly eligible alerts that do not already exist for an email.
+
 ## 8. View the dashboard
 
 Available routes:
