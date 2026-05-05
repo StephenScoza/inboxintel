@@ -6,6 +6,7 @@ const {
   deriveVendorIdentity,
   extractDomainRoot
 } = require("../dist/intelligence/vendorIdentity.js");
+const { buildSubscriptionInsights } = require("../dist/intelligence/subscriptionInsights.js");
 
 function evaluateEmail(overrides = {}) {
   return buildEmailIntelligence({
@@ -120,6 +121,39 @@ const tests = [
       assert.equal(vendor.vendor, "Netflix");
       assert.equal(vendor.normalizedVendor, "netflix");
       assert.equal(vendor.domainRoot, "netflix");
+    }
+  },
+  {
+    name: "scores a price increase subscription as a money leak",
+    run() {
+      const insights = buildSubscriptionInsights({
+        amount: 59.99,
+        nextRenewalAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10),
+        status: "ACTIVE",
+        confidence: 94,
+        sourceCategory: Category.PRICE_INCREASE,
+        notes: "price increase detected"
+      });
+
+      assert.ok(insights.moneyLeakScore >= 75);
+      assert.ok(insights.annualizedCost >= 700);
+      assert.ok(insights.reasons.some((reason) => reason.includes("price increase")));
+    }
+  },
+  {
+    name: "scores a past due subscription as high risk",
+    run() {
+      const insights = buildSubscriptionInsights({
+        amount: 14.99,
+        nextRenewalAt: new Date(Date.now() - 1000 * 60 * 60 * 24),
+        status: "PAST_DUE",
+        confidence: 88,
+        sourceCategory: Category.FAILED_PAYMENT,
+        notes: null
+      });
+
+      assert.ok(insights.riskScore >= 75);
+      assert.ok(insights.reasons.some((reason) => reason.includes("Failed payment")));
     }
   }
 ];

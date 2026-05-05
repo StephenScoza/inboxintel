@@ -2,6 +2,7 @@ import express from "express";
 import { Category } from "@prisma/client";
 import { prisma } from "../db";
 import { buildSenderInsights } from "../intelligence/senderInsights";
+import { buildSubscriptionInsights } from "../intelligence/subscriptionInsights";
 
 function escapeHtml(value: string | null | undefined): string {
   return (value ?? "")
@@ -52,6 +53,15 @@ function categoryClass(category: string | null | undefined): string {
 function renderCategoryPill(category: string | null | undefined): string {
   const value = category ?? "UNKNOWN";
   return `<span class="pill ${categoryClass(value)}">${escapeHtml(value)}</span>`;
+}
+
+function formatMoney(value: number | string | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  const amount = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : "n/a";
 }
 
 function renderHero(title: string, subtitle: string): string {
@@ -400,6 +410,7 @@ function renderPage(title: string, body: string): string {
           <a href="/emails">Emails</a>
           <a href="/senders">Senders</a>
           <a href="/subscriptions">Subscriptions</a>
+          <a href="/money-leaks">Money Leaks</a>
           <a href="/alerts">Alerts</a>
           <a href="/classifications">Classifications</a>
           <a href="/health">Health</a>
@@ -838,7 +849,7 @@ export function createWebServer() {
 
     const subscriptionItems = sender.subscriptions
       .map(
-        (subscription) => `<li>${escapeHtml(subscription.vendor)} · ${subscription.amount?.toString() ?? "n/a"} · ${formatDate(subscription.nextRenewalAt)} · ${renderCategoryPill(subscription.status)}</li>`
+        (subscription) => `<li>${escapeHtml(subscription.vendor)} · ${formatMoney(subscription.amount?.toString())} · ${formatDate(subscription.nextRenewalAt)} · ${renderCategoryPill(subscription.status)}</li>`
       )
       .join("");
 
@@ -903,14 +914,37 @@ export function createWebServer() {
       take: 100
     });
 
-    const rows = subscriptions
-      .map((subscription) => {
+    const decorated = subscriptions.map((subscription) => ({
+      subscription,
+      insights: buildSubscriptionInsights(subscription)
+    }));
+
+    const summary = {
+      total: decorated.length,
+      endingSoon: decorated.filter((entry) => entry.subscription.status === "ENDING_SOON").length,
+      pastDue: decorated.filter((entry) => entry.subscription.status === "PAST_DUE").length,
+      annualizedSpend: decorated.reduce((sum, entry) => sum + (entry.insights.annualizedCost ?? 0), 0)
+    };
+
+    const rows = decorated
+      .sort((left, right) => {
+        const riskDiff = right.insights.riskScore - left.insights.riskScore;
+        if (riskDiff !== 0) {
+          return riskDiff;
+        }
+
+        return right.insights.moneyLeakScore - left.insights.moneyLeakScore;
+      })
+      .map(({ subscription, insights }) => {
         return `<tr>
           <td>${escapeHtml(subscription.vendor)}</td>
           <td>${escapeHtml(subscription.sender?.email ?? "unknown")}</td>
-          <td>${subscription.amount?.toString() ?? "n/a"}</td>
+          <td>${formatMoney(subscription.amount?.toString())}</td>
+          <td>${formatMoney(insights.annualizedCost)}</td>
           <td>${formatDate(subscription.nextRenewalAt)}</td>
           <td>${renderCategoryPill(subscription.status)}</td>
+          <td><span class="score ${scoreClass(insights.riskScore)}">${insights.riskScore}</span></td>
+          <td><span class="score ${scoreClass(insights.moneyLeakScore)}">${insights.moneyLeakScore}</span></td>
           <td>${subscription.confidence}</td>
         </tr>`;
       })
@@ -920,18 +954,104 @@ export function createWebServer() {
       renderPage(
         "Subscriptions",
         `${renderHero("Subscription watchlist", "Track recurring vendors, renewal timing, and confidence so money-leak events surface before they become noise.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Tracked Vendors</div><div class="summary-value">${summary.total}</div></div>
+          <div class="summary-card"><div class="summary-label">Ending Soon</div><div class="summary-value">${summary.endingSoon}</div></div>
+          <div class="summary-card"><div class="summary-label">Past Due</div><div class="summary-value">${summary.pastDue}</div></div>
+          <div class="summary-card"><div class="summary-label">Annualized Spend</div><div class="summary-value">${formatMoney(summary.annualizedSpend)}</div></div>
+        </section>
         <table>
           <thead>
             <tr>
               <th>Vendor</th>
               <th>Sender</th>
-              <th>Amount</th>
+              <th>Monthly</th>
+              <th>Annualized</th>
               <th>Due Date</th>
               <th>Status</th>
+              <th>Risk</th>
+              <th>Leak</th>
               <th>Confidence</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="6">No subscriptions yet.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="8">No subscriptions yet.</td></tr>'}</tbody>
+        </table>`
+      )
+    );
+  });
+
+  app.get("/money-leaks", async (_req, res) => {
+    const subscriptions = await prisma.subscription.findMany({
+      include: {
+        sender: true
+      },
+      orderBy: [{ updatedAt: "desc" }],
+      take: 150
+    });
+
+    const ranked = subscriptions
+      .map((subscription) => ({
+        subscription,
+        insights: buildSubscriptionInsights(subscription)
+      }))
+      .sort((left, right) => {
+        const leakDiff = right.insights.moneyLeakScore - left.insights.moneyLeakScore;
+        if (leakDiff !== 0) {
+          return leakDiff;
+        }
+
+        const annualizedDiff = (right.insights.annualizedCost ?? 0) - (left.insights.annualizedCost ?? 0);
+        if (annualizedDiff !== 0) {
+          return annualizedDiff;
+        }
+
+        return right.insights.riskScore - left.insights.riskScore;
+      });
+
+    const summary = {
+      highLeak: ranked.filter((entry) => entry.insights.moneyLeakScore >= 75).length,
+      highRisk: ranked.filter((entry) => entry.insights.riskScore >= 75).length,
+      annualizedSpend: ranked.reduce((sum, entry) => sum + (entry.insights.annualizedCost ?? 0), 0)
+    };
+
+    const rows = ranked
+      .map(({ subscription, insights }) => {
+        return `<tr>
+          <td>${escapeHtml(subscription.vendor)}</td>
+          <td>${renderCategoryPill(subscription.sourceCategory ?? "UNKNOWN")}</td>
+          <td>${formatMoney(subscription.amount?.toString())}</td>
+          <td>${formatMoney(insights.annualizedCost)}</td>
+          <td>${formatDate(subscription.nextRenewalAt)}</td>
+          <td><span class="score ${scoreClass(insights.moneyLeakScore)}">${insights.moneyLeakScore}</span></td>
+          <td><span class="score ${scoreClass(insights.riskScore)}">${insights.riskScore}</span></td>
+          <td>${escapeHtml(insights.reasons.join(" | ") || "No special risk markers")}</td>
+        </tr>`;
+      })
+      .join("");
+
+    res.send(
+      renderPage(
+        "Money Leaks",
+        `${renderHero("Money leaks", "Rank subscriptions by recurring cost, failed-payment risk, price increases, and near-term renewals so expensive leaks stand out immediately.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">High Leak Score</div><div class="summary-value">${summary.highLeak}</div></div>
+          <div class="summary-card"><div class="summary-label">High Risk Score</div><div class="summary-value">${summary.highRisk}</div></div>
+          <div class="summary-card"><div class="summary-label">Annualized Spend</div><div class="summary-value">${formatMoney(summary.annualizedSpend)}</div></div>
+        </section>
+        <table>
+          <thead>
+            <tr>
+              <th>Vendor</th>
+              <th>Source</th>
+              <th>Monthly</th>
+              <th>Annualized</th>
+              <th>Due Date</th>
+              <th>Leak Score</th>
+              <th>Risk Score</th>
+              <th>Reasons</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="8">No subscription data yet.</td></tr>'}</tbody>
         </table>`
       )
     );
