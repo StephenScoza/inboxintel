@@ -9,6 +9,7 @@ import {
   determineSubscriptionStatus,
   shouldTrackSubscription
 } from "../intelligence/subscriptionFacts";
+import { cleanSenderName, deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { extractBody } from "../parser/extractBody";
 import { extractLinks } from "../parser/extractLinks";
 
@@ -29,7 +30,7 @@ function parseSender(raw: string | null) {
 
   const match = raw.match(/^(?:"?([^"]*)"?\s)?<?([^<>]+@[^<>]+)>?$/);
   const senderEmail = (match?.[2] ?? raw).trim().toLowerCase();
-  const senderName = match?.[1]?.trim() || null;
+  const senderName = cleanSenderName(match?.[1]?.trim() || null);
   const senderDomain = senderEmail.includes("@") ? senderEmail.split("@")[1] : null;
 
   return {
@@ -37,15 +38,6 @@ function parseSender(raw: string | null) {
     senderName,
     senderEmail,
     senderDomain
-  };
-}
-
-function deriveVendor(senderName: string | null, senderDomain: string | null): { vendor: string; normalized: string } {
-  const domainRoot = senderDomain?.split(".")[0] ?? "unknown";
-  const vendor = senderName || domainRoot;
-  return {
-    vendor,
-    normalized: vendor.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
   };
 }
 
@@ -165,7 +157,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   });
 
   if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
-    const vendor = deriveVendor(senderMeta.senderName, senderMeta.senderDomain);
+    const vendor = deriveVendorIdentity(senderMeta.senderName, senderMeta.senderEmail, senderMeta.senderDomain);
     const primaryAmount = chooseSubscriptionAmount(intelligence.amounts);
     const primaryDate = chooseImportantDate(intelligence.dates, intelligence.classification.category);
     const primaryDateIso = primaryDate?.iso ?? null;
@@ -182,7 +174,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
       where: {
         gmailAccountId_normalizedVendor: {
           gmailAccountId: context.gmailAccountId,
-          normalizedVendor: vendor.normalized
+          normalizedVendor: vendor.normalizedVendor
         }
       },
       update: {
@@ -197,12 +189,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         lastSeenAt: receivedAt ?? new Date(),
         notes
       },
-      create: {
-        gmailAccountId: context.gmailAccountId,
-        senderId: sender?.id ?? null,
-        vendor: vendor.vendor,
-        normalizedVendor: vendor.normalized,
-        amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
+        create: {
+          gmailAccountId: context.gmailAccountId,
+          senderId: sender?.id ?? null,
+          vendor: vendor.vendor,
+          normalizedVendor: vendor.normalizedVendor,
+          amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
         currency: primaryAmount?.currency ?? "USD",
         nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : null,
         status,

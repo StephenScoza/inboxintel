@@ -19,6 +19,59 @@ function formatDate(value: Date | string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? "n/a" : date.toLocaleString();
 }
 
+function categoryClass(category: string | null | undefined): string {
+  switch (category) {
+    case "FREE_TRIAL":
+      return "category-free-trial";
+    case "FAILED_PAYMENT":
+      return "category-failed-payment";
+    case "RENEWAL_NOTICE":
+      return "category-renewal-notice";
+    case "ORDER_OR_SHIPPING":
+      return "category-order-or-shipping";
+    case "PAYMENT_RECEIPT":
+      return "category-payment-receipt";
+    case "RETAIL_PROMO":
+      return "category-retail-promo";
+    case "PRICE_INCREASE":
+      return "category-price-increase";
+    case "RAFFLE_OR_GIVEAWAY":
+      return "category-raffle-or-giveaway";
+    case "ACCOUNT_SECURITY":
+      return "category-account-security";
+    case "SUBSCRIPTION":
+      return "category-subscription";
+    case "PERSONAL":
+      return "category-personal";
+    default:
+      return "category-unknown";
+  }
+}
+
+function renderCategoryPill(category: string | null | undefined): string {
+  const value = category ?? "UNKNOWN";
+  return `<span class="pill ${categoryClass(value)}">${escapeHtml(value)}</span>`;
+}
+
+function renderHero(title: string, subtitle: string): string {
+  return `
+    <section class="hero">
+      <div>
+        <div class="eyebrow">InboxIntel</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(subtitle)}</p>
+      </div>
+      <div class="hero-mark">
+        <div class="hero-icon">✉</div>
+        <div>
+          <strong>Know what matters.</strong>
+          <span>Every email.</span>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderPage(title: string, body: string): string {
   return `<!doctype html>
   <html lang="en">
@@ -28,40 +81,187 @@ function renderPage(title: string, body: string): string {
       <title>${escapeHtml(title)}</title>
       <style>
         :root {
-          color-scheme: light;
-          --bg: #f4efe6;
-          --card: #fffaf2;
-          --ink: #1f2937;
-          --muted: #6b7280;
-          --line: #d6c9b8;
-          --accent: #a54b1a;
-          --accent-soft: #f3d4b8;
+          color-scheme: dark;
+          --bg: #0b0f1a;
+          --panel: #111827;
+          --panel-soft: #1a2335;
+          --panel-strong: #0e1626;
+          --line: rgba(148, 163, 184, 0.18);
+          --ink: #f5f7fa;
+          --muted: #94a3b8;
+          --accent: #14b8a6;
+          --accent-2: #3b82f6;
+          --success: #22c55e;
+          --danger: #ef4444;
+          --warning: #f97316;
+          --violet: #8b5cf6;
+          --sky: #38bdf8;
+          --slate: #6b7280;
+          --white: #f5f7fa;
         }
         * { box-sizing: border-box; }
         body {
           margin: 0;
-          font-family: Georgia, "Times New Roman", serif;
-          background: radial-gradient(circle at top, #fff7eb 0%, var(--bg) 45%, #efe4d1 100%);
+          font-family: Inter, "Segoe UI", Helvetica, Arial, sans-serif;
+          background:
+            radial-gradient(circle at top left, rgba(20, 184, 166, 0.16), transparent 28%),
+            radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 34%),
+            linear-gradient(180deg, #09101c 0%, #0b0f1a 100%);
           color: var(--ink);
         }
         header {
-          padding: 24px 28px 12px;
+          padding: 24px 28px 16px;
+          border-bottom: 1px solid var(--line);
+          background: rgba(9, 16, 28, 0.82);
+          backdrop-filter: blur(12px);
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+        .brandbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 20px;
+          margin-bottom: 14px;
+        }
+        .brand {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .brand-lockup {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .brand-logo {
+          width: 48px;
+          height: 48px;
+          border-radius: 14px;
+          display: grid;
+          place-items: center;
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.28), rgba(20, 184, 166, 0.2));
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+          font-size: 1.35rem;
+        }
+        .brand-title {
+          font-size: 1.6rem;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+        }
+        .brand-title .intel {
+          color: var(--accent-2);
+        }
+        .brand-tagline {
+          color: var(--muted);
+          font-size: 0.92rem;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
         }
         nav a {
-          color: var(--accent);
-          margin-right: 14px;
+          color: var(--muted);
+          margin-right: 10px;
           text-decoration: none;
           font-weight: 700;
+          padding: 8px 12px;
+          border-radius: 999px;
+          transition: 140ms ease;
+        }
+        nav a:hover {
+          color: var(--white);
+          background: rgba(59, 130, 246, 0.12);
         }
         main {
-          padding: 0 28px 28px;
+          padding: 26px 28px 32px;
+          max-width: 1480px;
+          margin: 0 auto;
         }
         .card {
-          background: var(--card);
+          background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(13, 20, 35, 0.98));
+          border: 1px solid var(--line);
+          border-radius: 22px;
+          padding: 22px;
+          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+        }
+        .hero {
+          display: flex;
+          justify-content: space-between;
+          gap: 24px;
+          align-items: end;
+          margin-bottom: 24px;
+          padding-bottom: 20px;
+          border-bottom: 1px solid var(--line);
+        }
+        .hero h1 {
+          margin: 6px 0 8px;
+          font-size: clamp(2rem, 3vw, 2.8rem);
+          letter-spacing: -0.04em;
+        }
+        .hero p {
+          margin: 0;
+          max-width: 720px;
+          color: var(--muted);
+          font-size: 1rem;
+        }
+        .eyebrow {
+          color: var(--accent);
+          font-size: 0.84rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+        }
+        .hero-mark {
+          min-width: 240px;
+          padding: 18px 20px;
+          border-radius: 18px;
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(20, 184, 166, 0.12));
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          display: flex;
+          gap: 14px;
+          align-items: center;
+        }
+        .hero-mark strong,
+        .hero-mark span {
+          display: block;
+        }
+        .hero-mark span {
+          color: var(--muted);
+          margin-top: 4px;
+        }
+        .hero-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 16px;
+          display: grid;
+          place-items: center;
+          background: rgba(11, 15, 26, 0.58);
+          font-size: 1.3rem;
+        }
+        .summary-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 14px;
+          margin-bottom: 18px;
+        }
+        .summary-card {
+          background: linear-gradient(180deg, rgba(26, 35, 53, 0.94), rgba(13, 20, 35, 0.94));
           border: 1px solid var(--line);
           border-radius: 18px;
-          padding: 20px;
-          box-shadow: 0 10px 30px rgba(91, 53, 18, 0.08);
+          padding: 16px;
+        }
+        .summary-label {
+          color: var(--muted);
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+        .summary-value {
+          margin-top: 8px;
+          font-size: 1.8rem;
+          font-weight: 800;
+          letter-spacing: -0.04em;
         }
         table {
           width: 100%;
@@ -80,14 +280,40 @@ function renderPage(title: string, body: string): string {
           text-transform: uppercase;
           letter-spacing: 0.06em;
         }
+        tbody tr:hover {
+          background: rgba(59, 130, 246, 0.06);
+        }
         .pill {
           display: inline-block;
-          padding: 4px 8px;
+          padding: 5px 10px;
           border-radius: 999px;
-          background: var(--accent-soft);
-          color: #7a3310;
+          color: white;
           font-size: 0.8rem;
           font-weight: 700;
+          letter-spacing: 0.01em;
+        }
+        .category-free-trial { background: linear-gradient(135deg, #14b8a6, #0f766e); }
+        .category-failed-payment { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+        .category-renewal-notice { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+        .category-order-or-shipping { background: linear-gradient(135deg, #38bdf8, #0ea5e9); }
+        .category-payment-receipt { background: linear-gradient(135deg, #22c55e, #15803d); }
+        .category-retail-promo { background: linear-gradient(135deg, #6b7280, #475569); }
+        .category-price-increase { background: linear-gradient(135deg, #f97316, #ea580c); }
+        .category-raffle-or-giveaway { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .category-account-security { background: linear-gradient(135deg, #ef4444, #7f1d1d); }
+        .category-subscription { background: linear-gradient(135deg, #14b8a6, #0f766e); }
+        .category-personal { background: linear-gradient(135deg, #64748b, #475569); }
+        .category-unknown { background: linear-gradient(135deg, #334155, #1e293b); }
+        .score {
+          font-weight: 800;
+        }
+        .score-high { color: var(--danger); }
+        .score-medium { color: #f59e0b; }
+        .score-low { color: var(--accent); }
+        .section-title {
+          margin: 0 0 10px;
+          font-size: 1rem;
+          letter-spacing: 0.02em;
         }
         form {
           display: flex;
@@ -99,15 +325,26 @@ function renderPage(title: string, body: string): string {
           padding: 10px 12px;
           border-radius: 10px;
           border: 1px solid var(--line);
-          background: white;
+          background: rgba(17, 24, 39, 0.95);
+          color: var(--ink);
         }
-        a { color: var(--accent); }
+        button {
+          padding: 10px 14px;
+          border-radius: 12px;
+          border: 0;
+          background: linear-gradient(135deg, var(--accent-2), #2563eb);
+          color: white;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        a { color: #7dd3fc; }
         pre {
           white-space: pre-wrap;
-          background: #f8f2e9;
+          background: rgba(8, 13, 24, 0.96);
           border-radius: 12px;
           padding: 14px;
           border: 1px solid var(--line);
+          color: #dbe7f5;
         }
         .grid {
           display: grid;
@@ -119,15 +356,44 @@ function renderPage(title: string, body: string): string {
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         }
         .stat {
-          background: #fff;
+          background: linear-gradient(180deg, rgba(26, 35, 53, 0.94), rgba(13, 20, 35, 0.94));
           border: 1px solid var(--line);
           border-radius: 14px;
           padding: 14px;
+        }
+        .muted {
+          color: var(--muted);
+        }
+        ul {
+          padding-left: 18px;
+        }
+        @media (max-width: 900px) {
+          .hero {
+            flex-direction: column;
+            align-items: start;
+          }
+          .hero-mark {
+            min-width: 0;
+            width: 100%;
+          }
+          .brandbar {
+            flex-direction: column;
+            align-items: start;
+          }
         }
       </style>
     </head>
     <body>
       <header>
+        <div class="brandbar">
+          <div class="brand">
+            <div class="brand-logo">✉</div>
+            <div class="brand-lockup">
+              <div class="brand-title">Inbox<span class="intel">Intel</span></div>
+              <div class="brand-tagline">Know what matters. Every email.</div>
+            </div>
+          </div>
+        </div>
         <h1>${escapeHtml(title)}</h1>
         <nav>
           <a href="/emails">Emails</a>
@@ -187,20 +453,36 @@ export function createWebServer() {
       take: 100
     });
 
+    const summary = {
+      total: emails.length,
+      urgent: emails.filter((email) => (email.classification?.urgencyScore ?? 0) >= 75).length,
+      opportunities: emails.filter((email) => (email.classification?.opportunityScore ?? 0) >= 75).length,
+      trackedSenders: new Set(emails.map((email) => email.senderEmail).filter(Boolean)).size
+    };
+
     const rows = emails
       .map((email) => {
+        const urgency = email.classification?.urgencyScore ?? 0;
+        const opportunity = email.classification?.opportunityScore ?? 0;
         return `<tr>
           <td><a href="/emails/${email.id}">${escapeHtml(email.subject ?? "(no subject)")}</a></td>
           <td>${escapeHtml(email.senderEmail ?? email.senderRaw ?? "unknown")}</td>
-          <td><span class="pill">${escapeHtml(email.classification?.category ?? "UNKNOWN")}</span></td>
-          <td>${email.classification?.urgencyScore ?? 0}</td>
-          <td>${email.classification?.opportunityScore ?? 0}</td>
+          <td>${renderCategoryPill(email.classification?.category ?? "UNKNOWN")}</td>
+          <td><span class="score ${urgency >= 75 ? "score-high" : urgency >= 45 ? "score-medium" : "score-low"}">${urgency}</span></td>
+          <td><span class="score ${opportunity >= 75 ? "score-high" : opportunity >= 45 ? "score-medium" : "score-low"}">${opportunity}</span></td>
           <td>${formatDate(email.receivedAt)}</td>
         </tr>`;
       })
       .join("");
 
     const html = `
+      ${renderHero("Signal-first email intelligence", "Track renewals, price increases, failed payments, shipping events, and high-opportunity messages with a dark, alert-oriented workflow.")}
+      <section class="summary-grid">
+        <div class="summary-card"><div class="summary-label">Visible Emails</div><div class="summary-value">${summary.total}</div></div>
+        <div class="summary-card"><div class="summary-label">High Urgency</div><div class="summary-value">${summary.urgent}</div></div>
+        <div class="summary-card"><div class="summary-label">High Opportunity</div><div class="summary-value">${summary.opportunities}</div></div>
+        <div class="summary-card"><div class="summary-label">Tracked Senders</div><div class="summary-value">${summary.trackedSenders}</div></div>
+      </section>
       <form method="get">
         <select name="category">
           <option value="">All categories</option>
@@ -264,7 +546,7 @@ export function createWebServer() {
         <section>
           <p><strong>Subject:</strong> ${escapeHtml(email.subject ?? "(no subject)")}</p>
           <p><strong>Sender:</strong> ${escapeHtml(email.senderEmail ?? email.senderRaw ?? "unknown")}</p>
-          <p><strong>Category:</strong> <span class="pill">${escapeHtml(email.classification?.category ?? "UNKNOWN")}</span></p>
+          <p><strong>Category:</strong> ${renderCategoryPill(email.classification?.category ?? "UNKNOWN")}</p>
           <p><strong>Received:</strong> ${formatDate(email.receivedAt)}</p>
           <p><strong>Labels:</strong> ${escapeHtml(email.gmailLabels.join(", ") || "none")}</p>
           <p><strong>Snippet:</strong> ${escapeHtml(email.snippet)}</p>
@@ -342,7 +624,7 @@ export function createWebServer() {
           <td>${escapeHtml(sender.email)}</td>
           <td>${escapeHtml(sender.domain)}</td>
           <td>${sender.emailCount}</td>
-          <td><span class="pill">${escapeHtml(dominantCategory)}</span></td>
+          <td>${renderCategoryPill(dominantCategory)}</td>
         </tr>`;
       })
       .join("");
@@ -350,7 +632,8 @@ export function createWebServer() {
     res.send(
       renderPage(
         "Senders",
-        `<table>
+        `${renderHero("Sender intelligence", "See who appears most often, which domains dominate, and where each sender tends to land in your classification system.")}
+        <table>
           <thead>
             <tr>
               <th>Name</th>
@@ -385,7 +668,7 @@ export function createWebServer() {
           <td>${escapeHtml(subscription.sender?.email ?? "unknown")}</td>
           <td>${subscription.amount?.toString() ?? "n/a"}</td>
           <td>${formatDate(subscription.nextRenewalAt)}</td>
-          <td>${escapeHtml(subscription.status)}</td>
+          <td>${renderCategoryPill(subscription.status)}</td>
           <td>${subscription.confidence}</td>
         </tr>`;
       })
@@ -394,7 +677,8 @@ export function createWebServer() {
     res.send(
       renderPage(
         "Subscriptions",
-        `<table>
+        `${renderHero("Subscription watchlist", "Track recurring vendors, renewal timing, and confidence so money-leak events surface before they become noise.")}
+        <table>
           <thead>
             <tr>
               <th>Vendor</th>
@@ -426,7 +710,7 @@ export function createWebServer() {
       .map((alert) => {
         return `<tr>
           <td>${escapeHtml(alert.type)}</td>
-          <td>${escapeHtml(alert.category)}</td>
+          <td>${renderCategoryPill(alert.category)}</td>
           <td><a href="/emails/${alert.emailId}">${escapeHtml(alert.email.subject ?? "(no subject)")}</a></td>
           <td>${escapeHtml(alert.reason)}</td>
           <td>${alert.urgencyScore}</td>
@@ -439,7 +723,8 @@ export function createWebServer() {
     res.send(
       renderPage(
         "Alerts",
-        `<table>
+        `${renderHero("Alert stream", "Review every alert-worthy event that hit the pipeline, including urgency, opportunity, and the exact reason each item was escalated.")}
+        <table>
           <thead>
             <tr>
               <th>Type</th>
@@ -478,7 +763,7 @@ export function createWebServer() {
     const cards = classifications
       .map((item) => {
         return `<div class="stat">
-          <strong>${escapeHtml(item.category)}</strong>
+          <strong>${renderCategoryPill(item.category)}</strong>
           <p>Emails: ${item._count.category}</p>
           <p>Avg urgency: ${Math.round(item._avg.urgencyScore ?? 0)}</p>
           <p>Avg opportunity: ${Math.round(item._avg.opportunityScore ?? 0)}</p>
@@ -487,7 +772,13 @@ export function createWebServer() {
       })
       .join("");
 
-    res.send(renderPage("Classifications", `<div class="stats">${cards || "<p>No data yet.</p>"}</div>`));
+    res.send(
+      renderPage(
+        "Classifications",
+        `${renderHero("Category distribution", "Monitor how InboxIntel is classifying the mailbox and where confidence, urgency, and opportunity cluster across categories.")}
+        <div class="stats">${cards || "<p>No data yet.</p>"}</div>`
+      )
+    );
   });
 
   return app;

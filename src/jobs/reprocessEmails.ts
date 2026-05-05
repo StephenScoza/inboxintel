@@ -7,16 +7,8 @@ import {
   shouldTrackSubscription
 } from "../intelligence/subscriptionFacts";
 import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
+import { deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { sendDiscordAlert } from "../alerts/discord";
-
-function deriveVendor(senderName: string | null, senderDomain: string | null): { vendor: string; normalized: string } {
-  const domainRoot = senderDomain?.split(".")[0] ?? "unknown";
-  const vendor = senderName || domainRoot;
-  return {
-    vendor,
-    normalized: vendor.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
-  };
-}
 
 async function maybeCreateAlertsForReprocessedEmail(params: {
   emailId: string;
@@ -154,7 +146,7 @@ export async function runReprocess(limit?: number) {
     });
 
     if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
-      const vendor = deriveVendor(email.senderName, email.senderDomain);
+      const vendor = deriveVendorIdentity(email.senderName, email.senderEmail, email.senderDomain);
       const primaryAmount = chooseSubscriptionAmount(intelligence.amounts);
       const primaryDate = chooseImportantDate(intelligence.dates, intelligence.classification.category);
       const primaryDateIso = primaryDate?.iso ?? null;
@@ -172,7 +164,7 @@ export async function runReprocess(limit?: number) {
         where: {
           gmailAccountId_normalizedVendor: {
             gmailAccountId: email.gmailAccountId,
-            normalizedVendor: vendor.normalized
+            normalizedVendor: vendor.normalizedVendor
           }
         },
         update: {
@@ -191,7 +183,7 @@ export async function runReprocess(limit?: number) {
           gmailAccountId: email.gmailAccountId,
           senderId: email.senderId,
           vendor: vendor.vendor,
-          normalizedVendor: vendor.normalized,
+          normalizedVendor: vendor.normalizedVendor,
           amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
           currency: primaryAmount?.currency ?? "USD",
           nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : null,
