@@ -277,6 +277,20 @@ export function createWebServer() {
           <p><strong>Reasons:</strong> ${escapeHtml(email.classification?.reasons.join(" | ") ?? "n/a")}</p>
         </section>
         <section>
+          <h3>Extracted Intelligence</h3>
+          <pre>${escapeHtml(
+            JSON.stringify(
+              {
+                amounts: email.amountsJson,
+                dates: email.datesJson,
+                signals: email.classification?.signalsJson ?? null
+              },
+              null,
+              2
+            )
+          )}</pre>
+        </section>
+        <section>
           <h3>Links</h3>
           <ul>${linkItems || "<li>No links extracted.</li>"}</ul>
         </section>

@@ -1,12 +1,19 @@
-import { AlertType, Category, Prisma, SubscriptionStatus } from "@prisma/client";
+import { AlertType, Category, Prisma } from "@prisma/client";
 import { gmail_v1 } from "googleapis";
-import { prisma } from "../db";
 import { sendDiscordAlert } from "../alerts/discord";
 import { classifyEmail } from "../classifier/classifyEmail";
+import { prisma } from "../db";
+import {
+  chooseImportantDate,
+  chooseSubscriptionAmount,
+  determineSubscriptionStatus,
+  shouldTrackSubscription
+} from "../intelligence/subscriptionFacts";
 import { extractAmounts } from "../parser/extractAmounts";
 import { extractBody } from "../parser/extractBody";
 import { extractDates } from "../parser/extractDates";
 import { extractLinks } from "../parser/extractLinks";
+import { extractSignals } from "../parser/extractSignals";
 
 function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | null {
   const header = headers?.find((entry) => entry.name?.toLowerCase() === name.toLowerCase());
@@ -36,10 +43,6 @@ function parseSender(raw: string | null) {
   };
 }
 
-function choosePrimaryDate(dates: { iso: string }[]): string | null {
-  return dates[0]?.iso ?? null;
-}
-
 function deriveVendor(senderName: string | null, senderDomain: string | null): { vendor: string; normalized: string } {
   const domainRoot = senderDomain?.split(".")[0] ?? "unknown";
   const vendor = senderName || domainRoot;
@@ -49,42 +52,6 @@ function deriveVendor(senderName: string | null, senderDomain: string | null): {
   };
 }
 
-function determineSubscriptionStatus(category: Category, primaryDate: string | null): SubscriptionStatus {
-  if (!primaryDate) {
-    return SubscriptionStatus.UNKNOWN;
-  }
-
-  const diffMs = new Date(primaryDate).getTime() - Date.now();
-  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-  if (category === Category.FAILED_PAYMENT) {
-    return SubscriptionStatus.PAST_DUE;
-  }
-
-  if (days >= 0 && days <= 7) {
-    return SubscriptionStatus.ENDING_SOON;
-  }
-
-  if (days > 7) {
-    return SubscriptionStatus.ACTIVE;
-  }
-
-  return SubscriptionStatus.UNKNOWN;
-}
-
-function shouldTrackSubscription(category: Category): boolean {
-  const trackedCategories: Category[] = [
-    Category.SUBSCRIPTION,
-    Category.FREE_TRIAL,
-    Category.RENEWAL_NOTICE,
-    Category.PAYMENT_RECEIPT,
-    Category.PRICE_INCREASE,
-    Category.FAILED_PAYMENT
-  ];
-
-  return trackedCategories.includes(category);
-}
-
 function shouldPromoteHighOpportunity(category: Category, opportunityScore: number): AlertType[] {
   const opportunityCategories: Category[] = [
     Category.PRICE_INCREASE,
@@ -92,10 +59,7 @@ function shouldPromoteHighOpportunity(category: Category, opportunityScore: numb
     Category.FREE_TRIAL
   ];
 
-  if (
-    opportunityCategories.includes(category) &&
-    opportunityScore >= 75
-  ) {
+  if (opportunityCategories.includes(category) && opportunityScore >= 75) {
     return [AlertType.HIGH_OPPORTUNITY];
   }
 
@@ -136,6 +100,14 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   const links = extractLinks(plainTextBody, htmlBody);
   const amounts = extractAmounts(combinedText);
   const dates = extractDates(combinedText);
+  const signals = extractSignals({
+    subject,
+    snippet: message.snippet ?? null,
+    plainTextBody,
+    htmlBody,
+    labels: message.labelIds ?? [],
+    links
+  });
   const classification = classifyEmail({
     subject,
     snippet: message.snippet ?? null,
@@ -145,7 +117,8 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     senderDomain: senderMeta.senderDomain,
     links,
     amounts,
-    dates
+    dates,
+    signals
   });
 
   const sender = senderMeta.senderEmail
@@ -208,11 +181,19 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     }
   });
 
-  if (shouldTrackSubscription(classification.category)) {
+  if (shouldTrackSubscription(classification.category, signals)) {
     const vendor = deriveVendor(senderMeta.senderName, senderMeta.senderDomain);
-    const primaryAmount = amounts[0];
-    const primaryDate = choosePrimaryDate(dates);
-    const status = determineSubscriptionStatus(classification.category, primaryDate);
+    const primaryAmount = chooseSubscriptionAmount(amounts);
+    const primaryDate = chooseImportantDate(dates, classification.category);
+    const primaryDateIso = primaryDate?.iso ?? null;
+    const status = determineSubscriptionStatus(classification.category, primaryDateIso);
+    const notes = [
+      ...classification.reasons,
+      primaryAmount ? `amount-kind=${primaryAmount.kind}` : null,
+      primaryDate ? `date-kind=${primaryDate.kind}` : null
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | ");
 
     await prisma.subscription.upsert({
       where: {
@@ -226,12 +207,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         senderId: sender?.id ?? null,
         amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
         currency: primaryAmount?.currency ?? undefined,
-        nextRenewalAt: primaryDate ? new Date(primaryDate) : undefined,
+        nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : undefined,
         status,
         confidence: classification.confidence,
         sourceCategory: classification.category,
         lastSeenAt: receivedAt ?? new Date(),
-        notes: classification.reasons.join(" | ")
+        notes
       },
       create: {
         gmailAccountId: context.gmailAccountId,
@@ -240,12 +221,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         normalizedVendor: vendor.normalized,
         amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
         currency: primaryAmount?.currency ?? "USD",
-        nextRenewalAt: primaryDate ? new Date(primaryDate) : null,
+        nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : null,
         status,
         confidence: classification.confidence,
         sourceCategory: classification.category,
         lastSeenAt: receivedAt ?? new Date(),
-        notes: classification.reasons.join(" | ")
+        notes
       }
     });
   }
@@ -254,8 +235,10 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     ...classification.alertTypes,
     ...shouldPromoteHighOpportunity(classification.category, classification.opportunityScore)
   ]));
-  const primaryAmountLabel = amounts[0] ? `${amounts[0].currency} ${amounts[0].value.toFixed(2)}` : null;
-  const primaryDate = choosePrimaryDate(dates);
+  const primaryAmount = chooseSubscriptionAmount(amounts) ?? amounts[0] ?? null;
+  const primaryDate = chooseImportantDate(dates, classification.category) ?? dates[0] ?? null;
+  const primaryAmountLabel = primaryAmount ? `${primaryAmount.currency} ${primaryAmount.value.toFixed(2)}` : null;
+  const primaryDateIso = primaryDate?.iso ?? null;
 
   for (const alertType of alertTypes) {
     try {
@@ -269,7 +252,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         opportunityScore: classification.opportunityScore,
         confidence: classification.confidence,
         detectedAmount: primaryAmountLabel,
-        detectedDate: primaryDate,
+        detectedDate: primaryDateIso,
         gmailAccountEmail: context.gmailAccountEmail,
         emailId: email.id
       });

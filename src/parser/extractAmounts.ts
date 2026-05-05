@@ -2,6 +2,8 @@ export interface ExtractedAmount {
   raw: string;
   value: number;
   currency: string;
+  kind: "RECURRING" | "CHARGE" | "DISCOUNT" | "UNKNOWN";
+  context: string;
 }
 
 export function extractAmounts(text: string): ExtractedAmount[] {
@@ -15,13 +17,26 @@ export function extractAmounts(text: string): ExtractedAmount[] {
       continue;
     }
 
+    const start = Math.max(0, (match.index ?? 0) - 50);
+    const end = Math.min(text.length, (match.index ?? 0) + raw.length + 50);
+    const context = text.slice(start, end).replace(/\s+/g, " ").trim().toLowerCase();
+    const kind =
+      /monthly|month|annual|year|yr|renew|subscription|membership|billing cycle/.test(context)
+        ? "RECURRING"
+        : /charged|charge|invoice|receipt|payment|total|subtotal|billed/.test(context)
+          ? "CHARGE"
+          : /save|discount|off|coupon|promo/.test(context)
+            ? "DISCOUNT"
+            : "UNKNOWN";
+
     results.set(raw, {
       raw,
       value: numeric,
-      currency: "USD"
+      currency: "USD",
+      kind,
+      context
     });
   }
 
   return Array.from(results.values());
 }
-

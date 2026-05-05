@@ -1,7 +1,7 @@
 import { AlertType, Category } from "@prisma/client";
 import { ExtractedAmount } from "../parser/extractAmounts";
 import { ExtractedDate } from "../parser/extractDates";
-import { KEYWORDS, containsAny } from "./rules";
+import { ExtractedSignals } from "../parser/extractSignals";
 
 export interface ClassificationInput {
   subject: string | null;
@@ -13,6 +13,7 @@ export interface ClassificationInput {
   links: { url: string; domain: string | null; text: string | null }[];
   amounts: ExtractedAmount[];
   dates: ExtractedDate[];
+  signals: ExtractedSignals;
 }
 
 export interface ClassificationResult {
@@ -40,46 +41,33 @@ function daysUntil(iso: string): number | null {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
-function detectClosestDate(dates: ExtractedDate[]): { iso: string; daysUntil: number } | null {
+function detectClosestDate(dates: ExtractedDate[]): { iso: string; daysUntil: number; kind: ExtractedDate["kind"] } | null {
   const enriched = dates
     .map((entry) => {
       const remainingDays = daysUntil(entry.iso);
-      return remainingDays === null ? null : { iso: entry.iso, daysUntil: remainingDays };
+      return remainingDays === null ? null : { iso: entry.iso, daysUntil: remainingDays, kind: entry.kind };
     })
-    .filter((value): value is { iso: string; daysUntil: number } => Boolean(value))
+    .filter((value): value is { iso: string; daysUntil: number; kind: ExtractedDate["kind"] } => Boolean(value))
     .sort((a, b) => Math.abs(a.daysUntil) - Math.abs(b.daysUntil));
 
   return enriched[0] ?? null;
 }
 
 export function classifyEmail(input: ClassificationInput): ClassificationResult {
-  const combinedText = [
-    input.subject,
-    input.snippet,
-    input.plainTextBody,
-    input.htmlBody
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .toLowerCase();
+  const freeTrialHits = input.signals.freeTrial.map((match) => match.phrase);
+  const renewalHits = input.signals.renewal.map((match) => match.phrase);
+  const receiptHits = input.signals.paymentReceipt.map((match) => match.phrase);
+  const priceIncreaseHits = input.signals.priceIncrease.map((match) => match.phrase);
+  const failedPaymentHits = input.signals.failedPayment.map((match) => match.phrase);
+  const raffleHits = input.signals.raffle.map((match) => match.phrase);
+  const shippingHits = input.signals.shipping.map((match) => match.phrase);
+  const securityHits = input.signals.security.map((match) => match.phrase);
+  const subscriptionHits = input.signals.subscription.map((match) => match.phrase);
+  const retailHits = input.signals.retail.map((match) => match.phrase);
+  const urgentHits = input.signals.urgent.map((match) => match.phrase);
+  const unsubscribeHits = input.signals.unsubscribe.map((match) => match.phrase);
 
-  const freeTrialHits = containsAny(combinedText, KEYWORDS.freeTrial);
-  const renewalHits = containsAny(combinedText, KEYWORDS.renewal);
-  const receiptHits = containsAny(combinedText, KEYWORDS.paymentReceipt);
-  const priceIncreaseHits = containsAny(combinedText, KEYWORDS.priceIncrease);
-  const failedPaymentHits = containsAny(combinedText, KEYWORDS.failedPayment);
-  const raffleHits = containsAny(combinedText, KEYWORDS.raffle);
-  const shippingHits = containsAny(combinedText, KEYWORDS.shipping);
-  const securityHits = containsAny(combinedText, KEYWORDS.security);
-  const subscriptionHits = containsAny(combinedText, KEYWORDS.subscription);
-  const retailHits = containsAny(combinedText, KEYWORDS.retail);
-  const urgentHits = containsAny(combinedText, KEYWORDS.urgent);
-  const unsubscribeHits = containsAny(combinedText, KEYWORDS.unsubscribe);
-
-  const hasUnsubscribeLink = input.links.some((link) => {
-    const lowerText = (link.text ?? "").toLowerCase();
-    return lowerText.includes("unsubscribe") || link.url.toLowerCase().includes("unsubscribe");
-  });
+  const hasUnsubscribeLink = input.signals.unsubscribeLinkCount > 0;
 
   const closestDate = detectClosestDate(input.dates);
   const reasons: string[] = [];
@@ -149,12 +137,18 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 42;
     opportunityScore = 45;
     confidence = 80;
-  } else if ((hasUnsubscribeLink || unsubscribeHits.length) && retailHits.length) {
+  } else if ((hasUnsubscribeLink || unsubscribeHits.length) && (retailHits.length || input.signals.likelyMarketing)) {
     category = Category.RETAIL_PROMO;
     reasons.push(`Matched retail promo signals: ${retailHits.join(", ")}`);
     urgencyScore = 12;
     opportunityScore = 20;
     confidence = 82;
+  } else if (input.signals.likelySubscription) {
+    category = Category.SUBSCRIPTION;
+    reasons.push("Recurring or subscription language detected.");
+    urgencyScore = 48;
+    opportunityScore = 52;
+    confidence = 78;
   } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|icloud\.com/i.test(input.senderDomain)) {
     category = Category.PERSONAL;
     reasons.push("Sender uses a common personal mailbox domain.");
@@ -171,12 +165,15 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   }
 
   if (input.amounts.length) {
-    opportunityScore += 10;
+    const recurringAmount = input.amounts.find((amount) => amount.kind === "RECURRING");
+    const chargedAmount = input.amounts.find((amount) => amount.kind === "CHARGE");
+    opportunityScore += recurringAmount ? 16 : 10;
+    urgencyScore += chargedAmount && category === Category.FAILED_PAYMENT ? 5 : 0;
     reasons.push(`Detected ${input.amounts.length} dollar amount(s).`);
   }
 
   if (closestDate) {
-    reasons.push(`Detected date ${closestDate.iso}.`);
+    reasons.push(`Detected ${closestDate.kind.toLowerCase()} date ${closestDate.iso}.`);
     if (closestDate.daysUntil <= 7 && closestDate.daysUntil >= 0) {
       urgencyScore += 20;
       if (category === Category.FREE_TRIAL) {
@@ -185,7 +182,14 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       if (category === Category.RENEWAL_NOTICE || category === Category.SUBSCRIPTION) {
         alertTypes.add(AlertType.RENEWAL_SOON);
       }
+      if (category === Category.ACCOUNT_SECURITY || urgentHits.length) {
+        alertTypes.add(AlertType.URGENT_DEADLINE);
+      }
     }
+  }
+
+  if (category === Category.RAFFLE_OR_GIVEAWAY && urgentHits.length) {
+    alertTypes.add(AlertType.URGENT_DEADLINE);
   }
 
   if (category === Category.RETAIL_PROMO) {
@@ -212,6 +216,21 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       unsubscribeHits,
       hasUnsubscribeLink,
       labels: input.labels,
+      labelSignals: input.signals.labelSignals,
+      likelyTransactional: input.signals.likelyTransactional,
+      likelyMarketing: input.signals.likelyMarketing,
+      likelySubscription: input.signals.likelySubscription,
+      linkDomains: input.signals.linkDomains,
+      signalContexts: {
+        freeTrial: input.signals.freeTrial,
+        renewal: input.signals.renewal,
+        paymentReceipt: input.signals.paymentReceipt,
+        priceIncrease: input.signals.priceIncrease,
+        failedPayment: input.signals.failedPayment,
+        raffle: input.signals.raffle,
+        shipping: input.signals.shipping,
+        security: input.signals.security
+      },
       primaryAmount: input.amounts[0] ?? null,
       primaryDate: closestDate?.iso ?? null
     },
