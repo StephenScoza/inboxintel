@@ -160,3 +160,9 @@ Examples:
 - Gmail access is single-account in V1.
 - Duplicate prevention uses `gmailMessageId`.
 - All alerts are saved in Postgres even if a Discord webhook is not configured.
+
+Run the deterministic intelligence tests with:
+
+```bash
+npm test
+```
