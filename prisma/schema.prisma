@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Category {
+  PERSONAL
+  RETAIL_PROMO
+  SUBSCRIPTION
+  FREE_TRIAL
+  RENEWAL_NOTICE
+  PAYMENT_RECEIPT
+  PRICE_INCREASE
+  FAILED_PAYMENT
+  ORDER_OR_SHIPPING
+  ACCOUNT_SECURITY
+  RAFFLE_OR_GIVEAWAY
+  UNKNOWN
+}
+
+enum AlertType {
+  FREE_TRIAL_ENDING
+  RENEWAL_SOON
+  PRICE_INCREASE
+  FAILED_PAYMENT
+  HIGH_OPPORTUNITY
+  RAFFLE_OR_GIVEAWAY
+  URGENT_DEADLINE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  ENDING_SOON
+  PAST_DUE
+  UNKNOWN
+}
+
+model GmailAccount {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  tokenPath     String
+  historyId     String?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  emails        Email[]
+  subscriptions Subscription[]
+  alerts        Alert[]
+}
+
+model Email {
+  id               String          @id @default(cuid())
+  gmailMessageId   String          @unique
+  gmailThreadId    String?
+  gmailInternalAt  DateTime?
+  gmailLabels      String[]
+  senderRaw        String?
+  senderName       String?
+  senderEmail      String?
+  senderDomain     String?
+  subject          String?
+  snippet          String?
+  receivedAt       DateTime?
+  plainTextBody    String?
+  htmlBody         String?
+  rawPayload       Json?
+  amountsJson      Json?
+  datesJson        Json?
+  gmailAccountId   String
+  senderId         String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  gmailAccount     GmailAccount    @relation(fields: [gmailAccountId], references: [id], onDelete: Cascade)
+  sender           Sender?         @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  links            EmailLink[]
+  classification   Classification?
+  alerts           Alert[]
+}
+
+model EmailLink {
+  id        String   @id @default(cuid())
+  emailId   String
+  url       String
+  domain    String?
+  text      String?
+  createdAt DateTime @default(now())
+  email     Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@unique([emailId, url])
+}
+
+model Sender {
+  id         String         @id @default(cuid())
+  email      String         @unique
+  name       String?
+  domain     String
+  emailCount Int            @default(0)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  emails     Email[]
+  subscriptions Subscription[]
+}
+
+model Classification {
+  id               String    @id @default(cuid())
+  emailId          String    @unique
+  category         Category
+  confidence       Int
+  urgencyScore     Int
+  opportunityScore Int
+  reasons          String[]
+  signalsJson      Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  email            Email     @relation(fields: [emailId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  gmailAccountId   String
+  senderId         String?
+  vendor           String
+  normalizedVendor String
+  amount           Decimal?           @db.Decimal(10, 2)
+  currency         String?            @default("USD")
+  nextRenewalAt    DateTime?
+  status           SubscriptionStatus @default(UNKNOWN)
+  confidence       Int
+  sourceCategory   Category?
+  lastSeenAt       DateTime?
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  gmailAccount     GmailAccount       @relation(fields: [gmailAccountId], references: [id], onDelete: Cascade)
+  sender           Sender?            @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@unique([gmailAccountId, normalizedVendor])
+}
+
+model Alert {
+  id               String      @id @default(cuid())
+  emailId          String
+  gmailAccountId   String
+  type             AlertType
+  category         Category
+  reason           String
+  urgencyScore     Int
+  opportunityScore Int
+  webhookTarget    String?
+  deliveredAt      DateTime?
+  payloadJson      Json?
+  createdAt        DateTime    @default(now())
+  email            Email       @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  gmailAccount     GmailAccount @relation(fields: [gmailAccountId], references: [id], onDelete: Cascade)
+}
+
