@@ -1,6 +1,7 @@
 import { AlertType, Category, Prisma } from "@prisma/client";
 import { gmail_v1 } from "googleapis";
 import { sendDiscordAlert } from "../alerts/discord";
+import { shouldSuppressAlert } from "../alerts/policy";
 import { prisma } from "../db";
 import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
 import {
@@ -217,13 +218,47 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   const primaryDateIso = primaryDate?.iso ?? null;
 
   for (const alertType of alertTypes) {
+    const alertReason = intelligence.classification.reasons[0] ?? "Alert-worthy email";
+    const suppression = await shouldSuppressAlert({
+      emailId: email.id,
+      gmailAccountId: context.gmailAccountId,
+      alertType,
+      category: intelligence.classification.category,
+      sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
+      reason: alertReason,
+      urgencyScore: intelligence.classification.urgencyScore,
+      opportunityScore: intelligence.classification.opportunityScore
+    });
+
+    if (suppression.suppressed) {
+      await prisma.alert.create({
+        data: {
+          emailId: email.id,
+          gmailAccountId: context.gmailAccountId,
+          type: alertType,
+          category: intelligence.classification.category,
+          reason: `${alertReason} (suppressed duplicate)`,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
+          webhookTarget: "suppressed",
+          payloadJson: {
+            suppressed: true,
+            senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
+            suppressionKey: suppression.suppressionKey,
+            existingAlertId: suppression.existingAlertId
+          } as unknown as Prisma.InputJsonValue
+        }
+      });
+      continue;
+    }
+
     try {
       const delivery = await sendDiscordAlert({
         alertType,
         category: intelligence.classification.category,
         subject,
         sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
-        reason: intelligence.classification.reasons[0] ?? "Alert-worthy email",
+        reason: alertReason,
         urgencyScore: intelligence.classification.urgencyScore,
         opportunityScore: intelligence.classification.opportunityScore,
         confidence: intelligence.classification.confidence,
@@ -239,12 +274,16 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           gmailAccountId: context.gmailAccountId,
           type: alertType,
           category: intelligence.classification.category,
-          reason: intelligence.classification.reasons[0] ?? "Alert-worthy email",
+          reason: alertReason,
           urgencyScore: intelligence.classification.urgencyScore,
           opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
-          payloadJson: delivery.payloadJson as unknown as Prisma.InputJsonValue
+          payloadJson: {
+            ...(delivery.payloadJson as Record<string, unknown>),
+            senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
+            suppressionKey: suppression.suppressionKey
+          } as unknown as Prisma.InputJsonValue
         }
       });
     } catch (error) {
@@ -254,12 +293,14 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           gmailAccountId: context.gmailAccountId,
           type: alertType,
           category: intelligence.classification.category,
-          reason: `${intelligence.classification.reasons[0] ?? "Alert-worthy email"} (delivery failed)`,
+          reason: `${alertReason} (delivery failed)`,
           urgencyScore: intelligence.classification.urgencyScore,
           opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: "delivery-failed",
           payloadJson: {
-            error: error instanceof Error ? error.message : "Unknown delivery error"
+            error: error instanceof Error ? error.message : "Unknown delivery error",
+            senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
+            suppressionKey: suppression.suppressionKey
           } as unknown as Prisma.InputJsonValue
         }
       });

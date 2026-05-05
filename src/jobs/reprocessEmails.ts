@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { shouldSuppressAlert } from "../alerts/policy";
 import { prisma } from "../db";
 import {
   chooseImportantDate,
@@ -32,13 +33,48 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
       continue;
     }
 
+    const alertReason = params.classification.reasons[0] ?? "Alert-worthy email";
+    const suppression = await shouldSuppressAlert({
+      emailId: params.emailId,
+      gmailAccountId: params.gmailAccountId,
+      alertType,
+      category: params.classification.category,
+      sender: params.sender,
+      reason: alertReason,
+      urgencyScore: params.classification.urgencyScore,
+      opportunityScore: params.classification.opportunityScore
+    });
+
+    if (suppression.suppressed) {
+      await prisma.alert.create({
+        data: {
+          emailId: params.emailId,
+          gmailAccountId: params.gmailAccountId,
+          type: alertType,
+          category: params.classification.category,
+          reason: `${alertReason} (suppressed duplicate)`,
+          urgencyScore: params.classification.urgencyScore,
+          opportunityScore: params.classification.opportunityScore,
+          webhookTarget: "suppressed",
+          payloadJson: {
+            suppressed: true,
+            senderKey: params.sender,
+            suppressionKey: suppression.suppressionKey,
+            existingAlertId: suppression.existingAlertId,
+            reprocessed: true
+          } as unknown as Prisma.InputJsonValue
+        }
+      });
+      continue;
+    }
+
     try {
       const delivery = await sendDiscordAlert({
         alertType,
         category: params.classification.category,
         subject: params.subject,
         sender: params.sender,
-        reason: params.classification.reasons[0] ?? "Alert-worthy email",
+        reason: alertReason,
         urgencyScore: params.classification.urgencyScore,
         opportunityScore: params.classification.opportunityScore,
         confidence: params.classification.confidence,
@@ -54,12 +90,17 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
           gmailAccountId: params.gmailAccountId,
           type: alertType,
           category: params.classification.category,
-          reason: params.classification.reasons[0] ?? "Alert-worthy email",
+          reason: alertReason,
           urgencyScore: params.classification.urgencyScore,
           opportunityScore: params.classification.opportunityScore,
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
-          payloadJson: delivery.payloadJson as unknown as Prisma.InputJsonValue
+          payloadJson: {
+            ...(delivery.payloadJson as Record<string, unknown>),
+            senderKey: params.sender,
+            suppressionKey: suppression.suppressionKey,
+            reprocessed: true
+          } as unknown as Prisma.InputJsonValue
         }
       });
     } catch (error) {
@@ -69,13 +110,15 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
           gmailAccountId: params.gmailAccountId,
           type: alertType,
           category: params.classification.category,
-          reason: `${params.classification.reasons[0] ?? "Alert-worthy email"} (delivery failed)`,
+          reason: `${alertReason} (delivery failed)`,
           urgencyScore: params.classification.urgencyScore,
           opportunityScore: params.classification.opportunityScore,
           webhookTarget: "delivery-failed",
           payloadJson: {
             error: error instanceof Error ? error.message : "Unknown delivery error",
-            reprocessed: true
+            reprocessed: true,
+            senderKey: params.sender,
+            suppressionKey: suppression.suppressionKey
           } as unknown as Prisma.InputJsonValue
         }
       });

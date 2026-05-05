@@ -1057,16 +1057,56 @@ export function createWebServer() {
     );
   });
 
-  app.get("/alerts", async (_req, res) => {
+  app.get("/alerts", async (req, res) => {
+    const windowDays = Math.max(1, Math.min(30, Number(req.query.windowDays) || 7));
+    const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
     const alerts = await prisma.alert.findMany({
       include: {
         email: true
+      },
+      where: {
+        createdAt: {
+          gte: cutoff
+        }
       },
       orderBy: {
         createdAt: "desc"
       },
       take: 100
     });
+
+    const digestMap = new Map<string, { label: string; count: number; suppressed: number }>();
+    let deliveredCount = 0;
+    let suppressedCount = 0;
+
+    for (const alert of alerts) {
+      const key = `${alert.type}|${alert.category}`;
+      const current = digestMap.get(key) ?? {
+        label: `${alert.type} · ${alert.category}`,
+        count: 0,
+        suppressed: 0
+      };
+      current.count += 1;
+      if (alert.webhookTarget === "suppressed") {
+        current.suppressed += 1;
+        suppressedCount += 1;
+      } else {
+        deliveredCount += 1;
+      }
+      digestMap.set(key, current);
+    }
+
+    const digestCards = Array.from(digestMap.values())
+      .sort((left, right) => right.count - left.count)
+      .map(
+        (entry) => `<div class="stat">
+          <strong>${escapeHtml(entry.label)}</strong>
+          <p>Total: ${entry.count}</p>
+          <p>Suppressed: ${entry.suppressed}</p>
+          <p>Delivered: ${entry.count - entry.suppressed}</p>
+        </div>`
+      )
+      .join("");
 
     const rows = alerts
       .map((alert) => {
@@ -1077,6 +1117,7 @@ export function createWebServer() {
           <td>${escapeHtml(alert.reason)}</td>
           <td>${alert.urgencyScore}</td>
           <td>${alert.opportunityScore}</td>
+          <td>${escapeHtml(alert.webhookTarget ?? "unknown")}</td>
           <td>${formatDate(alert.deliveredAt ?? alert.createdAt)}</td>
         </tr>`;
       })
@@ -1085,7 +1126,24 @@ export function createWebServer() {
     res.send(
       renderPage(
         "Alerts",
-        `${renderHero("Alert stream", "Review every alert-worthy event that hit the pipeline, including urgency, opportunity, and the exact reason each item was escalated.")}
+        `${renderHero("Alert stream", "Review every alert-worthy event that hit the pipeline, including urgency, opportunity, suppression behavior, and a digest of recent alert volume.")}
+        <form method="get">
+          <select name="windowDays">
+            ${[1, 3, 7, 14, 30]
+              .map((value) => `<option value="${value}" ${value === windowDays ? "selected" : ""}>Last ${value} day${value === 1 ? "" : "s"}</option>`)
+              .join("")}
+          </select>
+          <button type="submit">Update Window</button>
+        </form>
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Recent Alerts</div><div class="summary-value">${alerts.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Delivered</div><div class="summary-value">${deliveredCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Suppressed</div><div class="summary-value">${suppressedCount}</div></div>
+        </section>
+        <section>
+          <h3 class="section-title">Digest</h3>
+          <div class="stats">${digestCards || "<p>No alerts in this window.</p>"}</div>
+        </section>
         <table>
           <thead>
             <tr>
@@ -1095,10 +1153,11 @@ export function createWebServer() {
               <th>Reason</th>
               <th>Urgency</th>
               <th>Opportunity</th>
+              <th>Delivery</th>
               <th>Sent</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="7">No alerts yet.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="8">No alerts yet.</td></tr>'}</tbody>
         </table>`
       )
     );

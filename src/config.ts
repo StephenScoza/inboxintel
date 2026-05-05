@@ -33,6 +33,7 @@ export const config = {
   discordMoneyLeaksWebhook: process.env.DISCORD_MONEY_LEAKS_WEBHOOK ?? "",
   discordOpportunitiesWebhook: process.env.DISCORD_OPPORTUNITIES_WEBHOOK ?? "",
   discordGeneralAlertsWebhook: process.env.DISCORD_GENERAL_ALERTS_WEBHOOK ?? "",
+  alertDedupWindowMinutes: parseNumber(process.env.ALERT_DEDUP_WINDOW_MINUTES, 180),
   gmailPageSize: parseNumber(process.env.GMAIL_PAGE_SIZE, 25),
   gmailPollIntervalMs: parseNumber(process.env.GMAIL_POLL_INTERVAL_MS, 300_000),
   tokensDir: path.resolve(process.cwd(), "tokens"),

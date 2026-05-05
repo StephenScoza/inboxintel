@@ -7,6 +7,7 @@ const {
   extractDomainRoot
 } = require("../dist/intelligence/vendorIdentity.js");
 const { buildSubscriptionInsights } = require("../dist/intelligence/subscriptionInsights.js");
+const { buildAlertSuppressionKey } = require("../dist/alerts/policy.js");
 
 function evaluateEmail(overrides = {}) {
   return buildEmailIntelligence({
@@ -154,6 +155,23 @@ const tests = [
 
       assert.ok(insights.riskScore >= 75);
       assert.ok(insights.reasons.some((reason) => reason.includes("Failed payment")));
+    }
+  },
+  {
+    name: "normalizes alert suppression keys for noisy sender strings",
+    run() {
+      const a = buildAlertSuppressionKey({
+        alertType: AlertType.FAILED_PAYMENT,
+        category: Category.FAILED_PAYMENT,
+        sender: '"Billing@Example.com"'
+      });
+      const b = buildAlertSuppressionKey({
+        alertType: AlertType.FAILED_PAYMENT,
+        category: Category.FAILED_PAYMENT,
+        sender: "billing@example.com"
+      });
+
+      assert.equal(a, b);
     }
   }
 ];
