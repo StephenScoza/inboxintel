@@ -162,6 +162,11 @@ function renderPage(title: string, body: string): string {
           color: var(--white);
           background: rgba(59, 130, 246, 0.12);
         }
+        nav a.active {
+          color: var(--white);
+          background: rgba(20, 184, 166, 0.18);
+          border: 1px solid rgba(20, 184, 166, 0.28);
+        }
         main {
           padding: 26px 28px 32px;
           max-width: 1480px;
@@ -413,6 +418,7 @@ function renderPage(title: string, body: string): string {
           <a href="/emails">Emails</a>
           <a href="/senders">Senders</a>
           <a href="/mailing-lists">Mailing Lists</a>
+          <a href="/taxonomy-review">Taxonomy Review</a>
           <a href="/subscriptions">Subscriptions</a>
           <a href="/money-leaks">Money Leaks</a>
           <a href="/analytics">Analytics</a>
@@ -1748,6 +1754,182 @@ export function createWebServer() {
             <table>
               <thead><tr><th>Alert Type</th><th>Category</th><th>Count</th></tr></thead>
               <tbody>${alertRows || '<tr><td colspan="3">No alerts yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+        </div>`
+      )
+    );
+  });
+
+  app.get("/taxonomy-review", async (_req, res) => {
+    const classifications = await prisma.classification.findMany({
+      include: {
+        email: {
+          select: {
+            id: true,
+            subject: true,
+            senderEmail: true,
+            senderDomain: true,
+            receivedAt: true
+          }
+        }
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 2000
+    });
+
+    const reviewByCategory = new Map<
+      Category,
+      {
+        count: number;
+        confidenceTotal: number;
+        urgencyTotal: number;
+        opportunityTotal: number;
+        lowConfidenceCount: number;
+        highUrgencyCount: number;
+        sample: Array<{
+          emailId: string;
+          subject: string | null;
+          senderEmail: string | null;
+          senderDomain: string | null;
+          reasons: string[];
+          confidence: number;
+        }>;
+      }
+    >();
+
+    for (const classification of classifications) {
+      const current = reviewByCategory.get(classification.category) ?? {
+        count: 0,
+        confidenceTotal: 0,
+        urgencyTotal: 0,
+        opportunityTotal: 0,
+        lowConfidenceCount: 0,
+        highUrgencyCount: 0,
+        sample: []
+      };
+
+      current.count += 1;
+      current.confidenceTotal += classification.confidence;
+      current.urgencyTotal += classification.urgencyScore;
+      current.opportunityTotal += classification.opportunityScore;
+      if (classification.confidence < 70) {
+        current.lowConfidenceCount += 1;
+      }
+      if (classification.urgencyScore >= 75) {
+        current.highUrgencyCount += 1;
+      }
+      if (current.sample.length < 3) {
+        current.sample.push({
+          emailId: classification.email.id,
+          subject: classification.email.subject,
+          senderEmail: classification.email.senderEmail,
+          senderDomain: classification.email.senderDomain,
+          reasons: classification.reasons.slice(0, 3),
+          confidence: classification.confidence
+        });
+      }
+
+      reviewByCategory.set(classification.category, current);
+    }
+
+    const categoryRows = Object.values(Category)
+      .map((category) => {
+        const entry = reviewByCategory.get(category) ?? {
+          count: 0,
+          confidenceTotal: 0,
+          urgencyTotal: 0,
+          opportunityTotal: 0,
+          lowConfidenceCount: 0,
+          highUrgencyCount: 0,
+          sample: []
+        };
+
+        const avgConfidence = entry.count ? Math.round(entry.confidenceTotal / entry.count) : 0;
+        const avgUrgency = entry.count ? Math.round(entry.urgencyTotal / entry.count) : 0;
+        const avgOpportunity = entry.count ? Math.round(entry.opportunityTotal / entry.count) : 0;
+        const sampleMarkup = entry.sample.length
+          ? `<ul>${entry.sample
+              .map(
+                (sample) =>
+                  `<li><a href="/emails/${sample.emailId}">${escapeHtml(sample.subject ?? "(no subject)")}</a> · ${escapeHtml(sample.senderEmail ?? sample.senderDomain ?? "unknown")} · conf ${sample.confidence}<br /><span class="muted">${escapeHtml(sample.reasons.join(" | "))}</span></li>`
+              )
+              .join("")}</ul>`
+          : renderEmptyState("No sampled emails.");
+
+        return `<tr>
+          <td>${renderCategoryPill(category)}</td>
+          <td>${CATEGORY_METADATA[category].family}</td>
+          <td>${entry.count}</td>
+          <td>${avgConfidence}</td>
+          <td>${avgUrgency}</td>
+          <td>${avgOpportunity}</td>
+          <td>${entry.lowConfidenceCount}</td>
+          <td>${entry.highUrgencyCount}</td>
+          <td>${sampleMarkup}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const lowConfidenceChart = renderHorizontalBarChart(
+      Object.values(Category)
+        .map((category) => {
+          const entry = reviewByCategory.get(category);
+          return {
+            label: category.replaceAll("_", " "),
+            value: entry?.lowConfidenceCount ?? 0
+          };
+        })
+        .filter((entry) => entry.value > 0)
+        .sort((left, right) => right.value - left.value)
+        .slice(0, 10),
+      {
+        valueFormatter: (value) => `${value} low-conf`
+      }
+    );
+
+    const confidenceChart = renderHorizontalBarChart(
+      Object.values(Category)
+        .map((category) => {
+          const entry = reviewByCategory.get(category);
+          const count = entry?.count ?? 0;
+          return {
+            label: category.replaceAll("_", " "),
+            value: count ? Math.round(entry!.confidenceTotal / count) : 0
+          };
+        })
+        .filter((entry) => entry.value > 0)
+        .sort((left, right) => right.value - left.value),
+      {
+        maxValue: 100,
+        valueFormatter: (value) => `${value}/100`
+      }
+    );
+
+    const totalClassified = classifications.length;
+    const lowConfidenceTotal = classifications.filter((entry) => entry.confidence < 70).length;
+    const urgentTotal = classifications.filter((entry) => entry.urgencyScore >= 75).length;
+
+    res.send(
+      renderPage(
+        "Taxonomy Review",
+        `${renderHero("Taxonomy review", "Audit every category as a system. See where confidence is weak, which buckets carry the most edge cases, and inspect real examples with the rule reasons that put them there.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Classified Emails</div><div class="summary-value">${totalClassified}</div></div>
+          <div class="summary-card"><div class="summary-label">Taxonomy Buckets</div><div class="summary-value">${Object.values(Category).length}</div></div>
+          <div class="summary-card"><div class="summary-label">Low Confidence</div><div class="summary-value">${lowConfidenceTotal}</div></div>
+          <div class="summary-card"><div class="summary-label">High Urgency</div><div class="summary-value">${urgentTotal}</div></div>
+        </section>
+        <div class="grid">
+          ${renderChartCard("Low-confidence hotspots", "Categories with the most emails scoring below 70 confidence are usually the best candidates for the next rule pass.", lowConfidenceChart)}
+          ${renderChartCard("Average confidence by category", "A quick precision view across the whole taxonomy.", confidenceChart)}
+          <section>
+            <h3 class="section-title">Category audit table</h3>
+            <table>
+              <thead><tr><th>Category</th><th>Family</th><th>Emails</th><th>Avg Confidence</th><th>Avg Urgency</th><th>Avg Opportunity</th><th>Low Conf</th><th>High Urgency</th><th>Samples</th></tr></thead>
+              <tbody>${categoryRows}</tbody>
             </table>
           </section>
         </div>`

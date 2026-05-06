@@ -158,6 +158,7 @@ Available routes:
 - `/emails/:id`
 - `/senders`
 - `/mailing-lists`
+- `/taxonomy-review`
 - `/subscriptions`
 - `/money-leaks`
 - `/analytics`

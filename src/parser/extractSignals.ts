@@ -56,6 +56,23 @@ function cleanCombinedText(parts: Array<string | null>): string {
     .trim();
 }
 
+function dedupeMatches(matches: SignalMatch[]): SignalMatch[] {
+  const seen = new Set<string>();
+  const deduped: SignalMatch[] = [];
+
+  for (const match of matches) {
+    const key = `${match.phrase}|${match.context}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(match);
+  }
+
+  return deduped;
+}
+
 export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
   const combinedText = cleanCombinedText([
     input.subject,
@@ -75,30 +92,30 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     ["CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_PURCHASES", "IMPORTANT"].includes(label)
   );
 
-  const banking = extractKeywordContexts(combinedText, KEYWORDS.banking);
-  const bill = extractKeywordContexts(combinedText, KEYWORDS.bill);
-  const travel = extractKeywordContexts(combinedText, KEYWORDS.travel);
-  const job = extractKeywordContexts(combinedText, KEYWORDS.job);
-  const healthcare = extractKeywordContexts(combinedText, KEYWORDS.healthcare);
-  const government = extractKeywordContexts(combinedText, KEYWORDS.government);
-  const education = extractKeywordContexts(combinedText, KEYWORDS.education);
-  const social = extractKeywordContexts(combinedText, KEYWORDS.social);
-  const newsletter = extractKeywordContexts(combinedText, KEYWORDS.newsletter);
-  const sms = extractKeywordContexts(combinedText, KEYWORDS.sms);
-  const shopping = extractKeywordContexts(combinedText, KEYWORDS.shopping);
-  const freeTrial = extractKeywordContexts(combinedText, KEYWORDS.freeTrial);
-  const renewal = extractKeywordContexts(combinedText, KEYWORDS.renewal);
-  const paymentReceipt = extractKeywordContexts(combinedText, KEYWORDS.paymentReceipt);
-  const priceIncrease = extractKeywordContexts(combinedText, KEYWORDS.priceIncrease);
-  const failedPayment = extractKeywordContexts(combinedText, KEYWORDS.failedPayment);
-  const raffle = extractKeywordContexts(combinedText, KEYWORDS.raffle);
-  const opportunity = extractKeywordContexts(combinedText, KEYWORDS.opportunity);
-  const shipping = extractKeywordContexts(combinedText, KEYWORDS.shipping);
-  const security = extractKeywordContexts(combinedText, KEYWORDS.security);
-  const subscription = extractKeywordContexts(combinedText, KEYWORDS.subscription);
-  const retail = extractKeywordContexts(combinedText, KEYWORDS.retail);
-  const unsubscribe = extractKeywordContexts(combinedText, KEYWORDS.unsubscribe);
-  const urgent = extractKeywordContexts(combinedText, KEYWORDS.urgent);
+  const banking = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.banking));
+  const bill = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.bill));
+  const travel = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.travel));
+  const job = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.job));
+  const healthcare = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.healthcare));
+  const government = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.government));
+  const education = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.education));
+  const social = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.social));
+  const newsletter = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.newsletter));
+  const sms = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.sms));
+  const shopping = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.shopping));
+  const freeTrial = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.freeTrial));
+  const renewal = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.renewal));
+  const paymentReceipt = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.paymentReceipt));
+  const priceIncrease = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.priceIncrease));
+  const failedPayment = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.failedPayment));
+  const raffle = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.raffle));
+  const opportunity = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.opportunity));
+  const shipping = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.shipping));
+  const security = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.security));
+  const subscription = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.subscription));
+  const retail = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.retail));
+  const unsubscribe = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.unsubscribe));
+  const urgent = dedupeMatches(extractKeywordContexts(combinedText, KEYWORDS.urgent));
 
   const likelyTransactional =
     banking.length > 0 ||
