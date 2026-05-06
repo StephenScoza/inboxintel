@@ -16,6 +16,24 @@ interface DiscordAlertInput {
   emailId: string;
 }
 
+interface DiscordWebhookPayload {
+  content?: string;
+  embeds: Array<{
+    title: string;
+    description: string;
+    color: number;
+    fields: Array<{
+      name: string;
+      value: string;
+      inline?: boolean;
+    }>;
+    footer: {
+      text: string;
+    };
+    url?: string;
+  }>;
+}
+
 function webhookForType(alertType: AlertType): string {
   switch (alertType) {
     case AlertType.FREE_TRIAL_ENDING:
@@ -35,30 +53,110 @@ function webhookForType(alertType: AlertType): string {
   }
 }
 
-export async function sendDiscordAlert(input: DiscordAlertInput) {
-  const webhookUrl = webhookForType(input.alertType);
+function colorForAlertType(alertType: AlertType): number {
+  switch (alertType) {
+    case AlertType.FAILED_PAYMENT:
+      return 0xef4444;
+    case AlertType.PRICE_INCREASE:
+      return 0xf97316;
+    case AlertType.FREE_TRIAL_ENDING:
+      return 0x14b8a6;
+    case AlertType.RENEWAL_SOON:
+      return 0x3b82f6;
+    case AlertType.RAFFLE_OR_GIVEAWAY:
+    case AlertType.HIGH_OPPORTUNITY:
+      return 0x8b5cf6;
+    case AlertType.URGENT_DEADLINE:
+      return 0xf59e0b;
+    default:
+      return 0x64748b;
+  }
+}
+
+function formatField(value: string | null | undefined, fallback = "n/a"): string {
+  const normalized = value?.trim();
+  return normalized ? normalized : fallback;
+}
+
+export function buildDiscordPayload(input: DiscordAlertInput): DiscordWebhookPayload {
   const detailUrl = `${config.webBaseUrl}/emails/${input.emailId}`;
 
-  const content = [
-    `**${input.alertType}**`,
-    `Category: ${input.category}`,
-    `Subject: ${input.subject ?? "(no subject)"}`,
-    `Sender: ${input.sender ?? "unknown"}`,
-    `Reason: ${input.reason}`,
-    `Urgency Score: ${input.urgencyScore}`,
-    `Opportunity Score: ${input.opportunityScore}`,
-    `Confidence: ${input.confidence}`,
-    `Detected Amount: ${input.detectedAmount ?? "n/a"}`,
-    `Detected Date: ${input.detectedDate ?? "n/a"}`,
-    `Gmail Account: ${input.gmailAccountEmail}`,
-    `Dashboard: ${detailUrl}`
-  ].join("\n");
+  return {
+    embeds: [
+      {
+        title: input.alertType.replace(/_/g, " "),
+        description: formatField(input.reason),
+        color: colorForAlertType(input.alertType),
+        url: detailUrl,
+        fields: [
+          {
+            name: "Category",
+            value: formatField(input.category),
+            inline: true
+          },
+          {
+            name: "Sender",
+            value: formatField(input.sender),
+            inline: true
+          },
+          {
+            name: "Gmail Account",
+            value: formatField(input.gmailAccountEmail),
+            inline: true
+          },
+          {
+            name: "Subject",
+            value: formatField(input.subject),
+            inline: false
+          },
+          {
+            name: "Urgency",
+            value: String(input.urgencyScore),
+            inline: true
+          },
+          {
+            name: "Opportunity",
+            value: String(input.opportunityScore),
+            inline: true
+          },
+          {
+            name: "Confidence",
+            value: String(input.confidence),
+            inline: true
+          },
+          {
+            name: "Detected Amount",
+            value: formatField(input.detectedAmount),
+            inline: true
+          },
+          {
+            name: "Detected Date",
+            value: formatField(input.detectedDate),
+            inline: true
+          },
+          {
+            name: "Dashboard",
+            value: `[View email](${detailUrl})`,
+            inline: false
+          }
+        ],
+        footer: {
+          text: "InboxIntel read-only Gmail monitor"
+        }
+      }
+    ]
+  };
+}
+
+export async function sendDiscordAlert(input: DiscordAlertInput) {
+  const webhookUrl = webhookForType(input.alertType);
+  const payload = buildDiscordPayload(input);
 
   if (!webhookUrl) {
     return {
       webhookTarget: "not-configured",
       deliveredAt: null,
-      payloadJson: { content }
+      payloadJson: payload
     };
   }
 
@@ -67,7 +165,7 @@ export async function sendDiscordAlert(input: DiscordAlertInput) {
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ content })
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
@@ -77,7 +175,6 @@ export async function sendDiscordAlert(input: DiscordAlertInput) {
   return {
     webhookTarget: webhookUrl,
     deliveredAt: new Date(),
-    payloadJson: { content }
+    payloadJson: payload
   };
 }
-

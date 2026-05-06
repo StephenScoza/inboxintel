@@ -280,7 +280,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
           payloadJson: {
-            ...(delivery.payloadJson as Record<string, unknown>),
+            ...((delivery.payloadJson as unknown) as Record<string, unknown>),
             senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
             suppressionKey: suppression.suppressionKey
           } as unknown as Prisma.InputJsonValue

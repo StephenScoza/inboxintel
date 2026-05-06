@@ -9,6 +9,13 @@ datasource db {
 
 enum Category {
   PERSONAL
+  BANKING
+  BILL_OR_UTILITY
+  TRAVEL
+  JOB_OR_CAREER
+  HEALTHCARE
+  GOVERNMENT
+  EDUCATION
   RETAIL_PROMO
   SUBSCRIPTION
   FREE_TRIAL
@@ -157,4 +164,3 @@ model Alert {
   email            Email       @relation(fields: [emailId], references: [id], onDelete: Cascade)
   gmailAccount     GmailAccount @relation(fields: [gmailAccountId], references: [id], onDelete: Cascade)
 }
-

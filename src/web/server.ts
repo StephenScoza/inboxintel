@@ -23,6 +23,20 @@ function formatDate(value: Date | string | null | undefined): string {
 
 function categoryClass(category: string | null | undefined): string {
   switch (category) {
+    case "BANKING":
+      return "category-banking";
+    case "BILL_OR_UTILITY":
+      return "category-bill-or-utility";
+    case "TRAVEL":
+      return "category-travel";
+    case "JOB_OR_CAREER":
+      return "category-job-or-career";
+    case "HEALTHCARE":
+      return "category-healthcare";
+    case "GOVERNMENT":
+      return "category-government";
+    case "EDUCATION":
+      return "category-education";
     case "FREE_TRIAL":
       return "category-free-trial";
     case "FAILED_PAYMENT":
@@ -304,6 +318,13 @@ function renderPage(title: string, body: string): string {
           letter-spacing: 0.01em;
         }
         .category-free-trial { background: linear-gradient(135deg, #14b8a6, #0f766e); }
+        .category-banking { background: linear-gradient(135deg, #0891b2, #155e75); }
+        .category-bill-or-utility { background: linear-gradient(135deg, #f59e0b, #b45309); }
+        .category-travel { background: linear-gradient(135deg, #0ea5e9, #0369a1); }
+        .category-job-or-career { background: linear-gradient(135deg, #6366f1, #4338ca); }
+        .category-healthcare { background: linear-gradient(135deg, #10b981, #047857); }
+        .category-government { background: linear-gradient(135deg, #475569, #1e293b); }
+        .category-education { background: linear-gradient(135deg, #a855f7, #7e22ce); }
         .category-failed-payment { background: linear-gradient(135deg, #ef4444, #b91c1c); }
         .category-renewal-notice { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
         .category-order-or-shipping { background: linear-gradient(135deg, #38bdf8, #0ea5e9); }

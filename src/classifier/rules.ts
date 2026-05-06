@@ -1,4 +1,77 @@
 export const KEYWORDS = {
+  banking: [
+    "checking account",
+    "savings account",
+    "bank account",
+    "debit card",
+    "credit card statement",
+    "transaction alert",
+    "account balance",
+    "bank statement",
+    "statement is ready"
+  ],
+  bill: [
+    "bill is ready",
+    "payment due",
+    "autopay",
+    "utility bill",
+    "electric bill",
+    "water bill",
+    "internet bill",
+    "phone bill",
+    "service address"
+  ],
+  travel: [
+    "trip",
+    "flight",
+    "hotel",
+    "boarding pass",
+    "check-in",
+    "itinerary",
+    "reservation",
+    "car rental",
+    "gate change"
+  ],
+  job: [
+    "interview",
+    "application",
+    "recruiter",
+    "hiring",
+    "job opportunity",
+    "candidate",
+    "resume",
+    "position"
+  ],
+  healthcare: [
+    "appointment",
+    "patient portal",
+    "medical",
+    "prescription",
+    "doctor",
+    "lab results",
+    "health insurance",
+    "copay"
+  ],
+  government: [
+    "dmv",
+    "irs",
+    "tax notice",
+    "benefits",
+    "social security",
+    "government",
+    "state of",
+    "city of"
+  ],
+  education: [
+    "tuition",
+    "class schedule",
+    "student account",
+    "course",
+    "assignment",
+    "campus",
+    "financial aid",
+    "registrar"
+  ],
   freeTrial: [
     "trial ends",
     "free trial",
@@ -45,6 +118,17 @@ export const KEYWORDS = {
     "retry payment"
   ],
   raffle: ["raffle", "giveaway", "draw closes", "enter to win", "sweepstakes", "winner announced"],
+  opportunity: [
+    "paid opinion study",
+    "paid study",
+    "online paid opinion study",
+    "market research",
+    "research study",
+    "focus group",
+    "paid survey",
+    "participants needed",
+    "spots still available"
+  ],
   shipping: [
     "shipped",
     "tracking",

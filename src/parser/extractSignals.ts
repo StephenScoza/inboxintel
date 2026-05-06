@@ -6,12 +6,20 @@ export interface SignalMatch {
 }
 
 export interface ExtractedSignals {
+  banking: SignalMatch[];
+  bill: SignalMatch[];
+  travel: SignalMatch[];
+  job: SignalMatch[];
+  healthcare: SignalMatch[];
+  government: SignalMatch[];
+  education: SignalMatch[];
   freeTrial: SignalMatch[];
   renewal: SignalMatch[];
   paymentReceipt: SignalMatch[];
   priceIncrease: SignalMatch[];
   failedPayment: SignalMatch[];
   raffle: SignalMatch[];
+  opportunity: SignalMatch[];
   shipping: SignalMatch[];
   security: SignalMatch[];
   subscription: SignalMatch[];
@@ -63,12 +71,20 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     ["CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_PURCHASES", "IMPORTANT"].includes(label)
   );
 
+  const banking = extractKeywordContexts(combinedText, KEYWORDS.banking);
+  const bill = extractKeywordContexts(combinedText, KEYWORDS.bill);
+  const travel = extractKeywordContexts(combinedText, KEYWORDS.travel);
+  const job = extractKeywordContexts(combinedText, KEYWORDS.job);
+  const healthcare = extractKeywordContexts(combinedText, KEYWORDS.healthcare);
+  const government = extractKeywordContexts(combinedText, KEYWORDS.government);
+  const education = extractKeywordContexts(combinedText, KEYWORDS.education);
   const freeTrial = extractKeywordContexts(combinedText, KEYWORDS.freeTrial);
   const renewal = extractKeywordContexts(combinedText, KEYWORDS.renewal);
   const paymentReceipt = extractKeywordContexts(combinedText, KEYWORDS.paymentReceipt);
   const priceIncrease = extractKeywordContexts(combinedText, KEYWORDS.priceIncrease);
   const failedPayment = extractKeywordContexts(combinedText, KEYWORDS.failedPayment);
   const raffle = extractKeywordContexts(combinedText, KEYWORDS.raffle);
+  const opportunity = extractKeywordContexts(combinedText, KEYWORDS.opportunity);
   const shipping = extractKeywordContexts(combinedText, KEYWORDS.shipping);
   const security = extractKeywordContexts(combinedText, KEYWORDS.security);
   const subscription = extractKeywordContexts(combinedText, KEYWORDS.subscription);
@@ -77,6 +93,12 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
   const urgent = extractKeywordContexts(combinedText, KEYWORDS.urgent);
 
   const likelyTransactional =
+    banking.length > 0 ||
+    bill.length > 0 ||
+    travel.length > 0 ||
+    healthcare.length > 0 ||
+    government.length > 0 ||
+    education.length > 0 ||
     paymentReceipt.length > 0 ||
     shipping.length > 0 ||
     failedPayment.length > 0 ||
@@ -86,6 +108,7 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
   const likelyMarketing =
     retail.length > 0 ||
     raffle.length > 0 ||
+    opportunity.length > 0 ||
     unsubscribeLinkCount > 0 ||
     labelSignals.includes("CATEGORY_PROMOTIONS");
 
@@ -96,12 +119,20 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     containsAny(lower, ["cancel anytime", "monthly", "annual", "membership", "plan"]).length > 0;
 
   return {
+    banking,
+    bill,
+    travel,
+    job,
+    healthcare,
+    government,
+    education,
     freeTrial,
     renewal,
     paymentReceipt,
     priceIncrease,
     failedPayment,
     raffle,
+    opportunity,
     shipping,
     security,
     subscription,

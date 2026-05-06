@@ -8,6 +8,7 @@ const {
 } = require("../dist/intelligence/vendorIdentity.js");
 const { buildSubscriptionInsights } = require("../dist/intelligence/subscriptionInsights.js");
 const { buildAlertSuppressionKey } = require("../dist/alerts/policy.js");
+const { buildDiscordPayload } = require("../dist/alerts/discord.js");
 
 function evaluateEmail(overrides = {}) {
   return buildEmailIntelligence({
@@ -53,6 +54,34 @@ const tests = [
       assert.ok(result.classification.alertTypes.includes(AlertType.FAILED_PAYMENT));
       assert.ok(result.classification.urgencyScore >= 85);
       assert.equal(result.amounts[0]?.kind, "RECURRING");
+    }
+  },
+  {
+    name: "classifies banking-style messages",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your credit card statement is ready",
+        plainTextBody: "Your credit card statement is ready. View your account balance and recent transactions.",
+        senderDomain: "chase.com"
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.ok(result.classification.confidence >= 80);
+      assert.equal(result.signals.banking.length > 0, true);
+    }
+  },
+  {
+    name: "classifies bill and utility reminders",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your electric bill is ready",
+        plainTextBody: "Your utility bill is ready. Payment due on May 12. Autopay is enabled.",
+        senderDomain: "utility.example.com"
+      });
+
+      assert.equal(result.classification.category, Category.BILL_OR_UTILITY);
+      assert.ok(result.classification.urgencyScore >= 50);
+      assert.equal(result.signals.bill.length > 0, true);
     }
   },
   {
@@ -172,6 +201,46 @@ const tests = [
       });
 
       assert.equal(a, b);
+    }
+  },
+  {
+    name: "builds Discord embed payloads instead of plain text blobs",
+    run() {
+      const payload = buildDiscordPayload({
+        alertType: AlertType.RENEWAL_SOON,
+        category: Category.SUBSCRIPTION,
+        subject: "Adobe Creative Cloud renews soon",
+        sender: "billing@adobe.com",
+        reason: "Renewal within 2 days",
+        urgencyScore: 91,
+        opportunityScore: 34,
+        confidence: 95,
+        detectedAmount: "USD 59.99",
+        detectedDate: "2026-05-07T00:00:00.000Z",
+        gmailAccountEmail: "stephen.scoza@gmail.com",
+        emailId: "email_123"
+      });
+
+      assert.equal(Array.isArray(payload.embeds), true);
+      assert.equal(payload.embeds.length, 1);
+      assert.equal(payload.embeds[0].title, "RENEWAL SOON");
+      assert.equal(payload.embeds[0].fields.some((field) => field.name === "Dashboard"), true);
+      assert.equal("content" in payload, false);
+    }
+  },
+  {
+    name: "classifies paid opinion studies as high-opportunity alerts",
+    run() {
+      const result = evaluateEmail({
+        subject: "ONLINE PAID OPINION STUDY $150- SPOTS STILL AVAILABLE",
+        plainTextBody: "Participants needed for an online paid opinion study. Spots still available. Earn $150.",
+        senderDomain: "researchpanel.com"
+      });
+
+      assert.equal(result.classification.category, Category.UNKNOWN);
+      assert.ok(result.classification.opportunityScore >= 85);
+      assert.ok(result.classification.alertTypes.includes(AlertType.HIGH_OPPORTUNITY));
+      assert.equal(result.signals.opportunity.length > 0, true);
     }
   }
 ];

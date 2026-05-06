@@ -96,7 +96,7 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
           payloadJson: {
-            ...(delivery.payloadJson as Record<string, unknown>),
+            ...((delivery.payloadJson as unknown) as Record<string, unknown>),
             senderKey: params.sender,
             suppressionKey: suppression.suppressionKey,
             reprocessed: true
