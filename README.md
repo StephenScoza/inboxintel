@@ -64,17 +64,29 @@ You can change either one in `.env`.
 
 ## 4. Run Docker
 
-Start Postgres and the app:
+Start Postgres, the dashboard, and the Gmail worker:
 
 ```bash
 docker compose up --build
 ```
 
-The dashboard will be available at [http://localhost:3217](http://localhost:3217) by default.
+The local dashboard URL is [http://localhost:3217](http://localhost:3217) by default.
+
+Docker services:
+
+- `app` serves the dashboard and API
+- `worker` runs the Gmail polling loop
+- `db` runs Postgres on host port `55432` by default
+
+If you only want the dashboard and database at first:
+
+```bash
+docker compose up --build app db
+```
 
 ## 5. Run Prisma migrations
 
-The app container runs Prisma deploy migrations on startup. You can also run them manually:
+The app and worker containers both run Prisma deploy migrations on startup. You can also run them manually:
 
 ```bash
 docker compose exec app npm run prisma:migrate
@@ -113,10 +125,12 @@ Run a one-time ingest:
 docker compose exec app npm run ingest
 ```
 
-Run the worker loop:
+The worker service is already configured in Docker Compose and will start when you run `docker compose up --build`.
+
+You can also start or restart it explicitly:
 
 ```bash
-docker compose exec app npm run worker
+docker compose up -d worker
 ```
 
 The worker periodically fetches Gmail messages in pages, stores new emails, classifies them, updates subscriptions, and writes alerts.
@@ -139,10 +153,12 @@ The reprocess job refreshes stored extracted amounts, extracted dates, classific
 
 Available routes:
 
+- `/`
 - `/emails`
 - `/emails/:id`
 - `/senders`
 - `/subscriptions`
+- `/money-leaks`
 - `/alerts`
 - `/classifications`
 - `/health`
@@ -174,3 +190,10 @@ Run the deterministic intelligence tests with:
 ```bash
 npm test
 ```
+
+## Docker notes
+
+- Host web URL: `http://localhost:3217`
+- Host Postgres port: `55432`
+- OAuth redirect URI should match the host web URL, usually `http://localhost:3217/oauth2callback`
+- Gmail tokens persist in the local `tokens/` folder, which is mounted into both `app` and `worker`

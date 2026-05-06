@@ -25,16 +25,38 @@ services:
       db:
         condition: service_healthy
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
+      PORT: ${PORT:-3217}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/inboxintel?schema=public}
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:3217}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3217/oauth2callback}
     ports:
       - "${PORT:-3217}:${PORT:-3217}"
     volumes:
-      - .:/app
-      - /app/node_modules
       - ./tokens:/app/tokens
-    command: sh -c "npm install && npx prisma generate && npm run prisma:migrate && npm run dev"
+    command: sh -c "npx prisma migrate deploy && node dist/index.js"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: ${PORT:-3217}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/inboxintel?schema=public}
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:3217}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3217/oauth2callback}
+    volumes:
+      - ./tokens:/app/tokens
+    command: sh -c "npx prisma migrate deploy && node dist/jobs/ingestGmail.js --loop"
 
 volumes:
   postgres-data:

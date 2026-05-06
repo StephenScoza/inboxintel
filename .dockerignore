@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.gitignore
+tokens
+.env
+postgres-data
+npm-debug.log

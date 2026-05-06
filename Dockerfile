@@ -3,16 +3,20 @@ FROM node:20-bookworm-slim
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY prisma ./prisma
 RUN npx prisma generate
 
 COPY src ./src
+COPY tests ./tests
 COPY .env.example ./
 COPY README.md ./
 
-EXPOSE 3000
+RUN npm run build
 
-CMD ["npm", "run", "dev"]
+ENV NODE_ENV=production
+EXPOSE 3217
+
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
