@@ -82,6 +82,43 @@ export const KEYWORDS = {
     "financial aid",
     "registrar"
   ],
+  social: [
+    "invitation",
+    "noticed you",
+    "viewed your profile",
+    "connect with",
+    "add ",
+    "commented on your post",
+    "liked your post",
+    "reaction",
+    "friend request",
+    "community update",
+    "neighbor",
+    "nextdoor"
+  ],
+  newsletter: [
+    "weekly roundup",
+    "release notes",
+    "product update",
+    "what's new",
+    "whats new",
+    "newsletter",
+    "new feature",
+    "tips and tricks",
+    "browser extension",
+    "chat history",
+    "daily help",
+    "gemini"
+  ],
+  sms: [
+    "new text message",
+    "google voice",
+    "text stop to opt-out",
+    "txt stop=end",
+    "reply to this text message",
+    "missed a call",
+    "voicemail"
+  ],
   shopping: [
     "shop",
     "shopping",
@@ -193,24 +230,44 @@ export const KEYWORDS = {
 };
 
 export function containsAny(text: string, phrases: string[]): string[] {
-  const lower = text.toLowerCase();
-  return phrases.filter((phrase) => lower.includes(phrase));
+  return phrases.filter((phrase) => phraseMatches(text, phrase));
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildPhraseRegex(phrase: string): RegExp {
+  const escaped = escapeRegex(phrase);
+  const startsWord = /^[a-z0-9]/i.test(phrase);
+  const endsWord = /[a-z0-9]$/i.test(phrase);
+  const prefix = startsWord ? "(^|[^a-z0-9])" : "";
+  const suffix = endsWord ? "($|[^a-z0-9])" : "";
+  return new RegExp(`${prefix}(${escaped})${suffix}`, "ig");
+}
+
+function phraseMatches(text: string, phrase: string): boolean {
+  return buildPhraseRegex(phrase).test(text);
 }
 
 export function extractKeywordContexts(text: string, phrases: string[], radius = 60): Array<{ phrase: string; context: string }> {
-  const lower = text.toLowerCase();
   const matches: Array<{ phrase: string; context: string }> = [];
 
   for (const phrase of phrases) {
-    const index = lower.indexOf(phrase);
-    if (index === -1) {
-      continue;
-    }
+    const regex = buildPhraseRegex(phrase);
+    let match: RegExpExecArray | null;
 
-    const start = Math.max(0, index - radius);
-    const end = Math.min(text.length, index + phrase.length + radius);
-    const context = text.slice(start, end).replace(/\s+/g, " ").trim();
-    matches.push({ phrase, context });
+    while ((match = regex.exec(text)) !== null) {
+      const phraseIndex = match.index + (match[1] ? match[1].length : 0);
+      const start = Math.max(0, phraseIndex - radius);
+      const end = Math.min(text.length, phraseIndex + phrase.length + radius);
+      const context = text.slice(start, end).replace(/\s+/g, " ").trim();
+      matches.push({ phrase, context });
+
+      if (!regex.global) {
+        break;
+      }
+    }
   }
 
   return matches;

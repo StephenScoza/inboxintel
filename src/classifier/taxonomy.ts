@@ -50,6 +50,21 @@ export const CATEGORY_METADATA: Record<Category, { family: CategoryFamily; descr
     description: "School, course, tuition, financial aid, and registrar communication.",
     cssClass: "category-education"
   },
+  SOCIAL_OR_COMMUNITY: {
+    family: "ENGAGEMENT",
+    description: "Social networks, community updates, invites, reactions, and relationship-driven notifications.",
+    cssClass: "category-social-or-community"
+  },
+  PRODUCT_OR_NEWSLETTER: {
+    family: "SYSTEM",
+    description: "Product updates, release notes, newsletters, tips, and vendor communication that is not directly transactional.",
+    cssClass: "category-product-or-newsletter"
+  },
+  SMS_OR_TEXT: {
+    family: "SYSTEM",
+    description: "SMS relays, Google Voice notifications, and text-style messaging routed through email.",
+    cssClass: "category-sms-or-text"
+  },
   SHOPPING: {
     family: "COMMERCE",
     description: "General commerce, brand, store, merchandise, and shopping emails.",

@@ -118,6 +118,19 @@ const tests = [
     }
   },
   {
+    name: "does not misclassify normal words as government keyword matches",
+    run() {
+      const result = evaluateEmail({
+        subject: "The NEW hydrating shampoo and glossing conditioner you need",
+        plainTextBody: "From the buzzy brand behind all the best hair.",
+        senderDomain: "beauty.sephora.com"
+      });
+
+      assert.notEqual(result.classification.category, Category.GOVERNMENT);
+      assert.equal(result.signals.government.length, 0);
+    }
+  },
+  {
     name: "classifies bill and utility reminders",
     run() {
       const result = evaluateEmail({
@@ -172,6 +185,45 @@ const tests = [
 
       assert.equal(result.classification.category, Category.SHOPPING);
       assert.equal(result.signals.government.length, 0);
+    }
+  },
+  {
+    name: "classifies LinkedIn-style notifications as social and community",
+    run() {
+      const result = evaluateEmail({
+        subject: "11 people noticed you",
+        plainTextBody: "You're getting noticed. Add Hannah Harless and see who reached out.",
+        senderDomain: "linkedin.com"
+      });
+
+      assert.equal(result.classification.category, Category.SOCIAL_OR_COMMUNITY);
+      assert.ok(result.classification.confidence >= 80);
+    }
+  },
+  {
+    name: "classifies product update emails as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Stephen, bring your AI memories and chat history to Gemini",
+        plainTextBody: "Get Gemini up to speed on what matters to you with new features and product updates.",
+        senderDomain: "google.com"
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+      assert.ok(result.classification.confidence >= 75);
+    }
+  },
+  {
+    name: "classifies Google Voice relays as sms or text",
+    run() {
+      const result = evaluateEmail({
+        subject: "New text message from 62297",
+        plainTextBody: "Google Voice Macy's: Ends tonight! Order your mom's gift by 11:59pm tonight to make it in time for Mother's Day. Text STOP=End.",
+        senderDomain: "google.com"
+      });
+
+      assert.equal(result.classification.category, Category.SMS_OR_TEXT);
+      assert.ok(result.classification.confidence >= 80);
     }
   },
   {

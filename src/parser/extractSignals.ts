@@ -13,6 +13,9 @@ export interface ExtractedSignals {
   healthcare: SignalMatch[];
   government: SignalMatch[];
   education: SignalMatch[];
+  social: SignalMatch[];
+  newsletter: SignalMatch[];
+  sms: SignalMatch[];
   shopping: SignalMatch[];
   freeTrial: SignalMatch[];
   renewal: SignalMatch[];
@@ -79,6 +82,9 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
   const healthcare = extractKeywordContexts(combinedText, KEYWORDS.healthcare);
   const government = extractKeywordContexts(combinedText, KEYWORDS.government);
   const education = extractKeywordContexts(combinedText, KEYWORDS.education);
+  const social = extractKeywordContexts(combinedText, KEYWORDS.social);
+  const newsletter = extractKeywordContexts(combinedText, KEYWORDS.newsletter);
+  const sms = extractKeywordContexts(combinedText, KEYWORDS.sms);
   const shopping = extractKeywordContexts(combinedText, KEYWORDS.shopping);
   const freeTrial = extractKeywordContexts(combinedText, KEYWORDS.freeTrial);
   const renewal = extractKeywordContexts(combinedText, KEYWORDS.renewal);
@@ -101,6 +107,7 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     healthcare.length > 0 ||
     government.length > 0 ||
     education.length > 0 ||
+    sms.length > 0 ||
     paymentReceipt.length > 0 ||
     shipping.length > 0 ||
     failedPayment.length > 0 ||
@@ -112,6 +119,8 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     retail.length > 0 ||
     raffle.length > 0 ||
     opportunity.length > 0 ||
+    social.length > 0 ||
+    newsletter.length > 0 ||
     unsubscribeLinkCount > 0 ||
     labelSignals.includes("CATEGORY_PROMOTIONS");
 
@@ -129,6 +138,9 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     healthcare,
     government,
     education,
+    social,
+    newsletter,
+    sms,
     shopping,
     freeTrial,
     renewal,

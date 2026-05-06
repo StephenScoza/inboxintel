@@ -78,6 +78,42 @@ function isJobPlatformDomain(senderDomain: string | null): boolean {
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
+function isSocialDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return [
+    "linkedin.com",
+    "linkedinmail.com",
+    "nextdoor.com",
+    "facebookmail.com",
+    "facebook.com",
+    "instagram.com",
+    "x.com",
+    "twitter.com",
+    "discord.com"
+  ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function isVoiceRelayDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return ["google.com", "txt.voice.google.com", "voice.google.com"]
+    .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function isProductNewsletterDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return ["openai.com", "proxyscrape.com", "firecrawl.dev", "firecrawl.com", "google.com"]
+    .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
 function detectJobSubjectSignals(subject: string | null): string[] {
   if (!subject) {
     return [];
@@ -114,6 +150,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const healthcareHits = input.signals.healthcare.map((match) => match.phrase);
   const governmentHits = input.signals.government.map((match) => match.phrase);
   const educationHits = input.signals.education.map((match) => match.phrase);
+  const socialHits = input.signals.social.map((match) => match.phrase);
+  const newsletterHits = input.signals.newsletter.map((match) => match.phrase);
+  const smsHits = input.signals.sms.map((match) => match.phrase);
   const shoppingHits = input.signals.shopping.map((match) => match.phrase);
   const freeTrialHits = input.signals.freeTrial.map((match) => match.phrase);
   const renewalHits = input.signals.renewal.map((match) => match.phrase);
@@ -128,6 +167,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const retailHits = input.signals.retail.map((match) => match.phrase);
   const urgentHits = input.signals.urgent.map((match) => match.phrase);
   const unsubscribeHits = input.signals.unsubscribe.map((match) => match.phrase);
+  const strongSocialSignal = socialHits.length > 0 || isSocialDomain(input.senderDomain);
+  const strongNewsletterSignal =
+    newsletterHits.length > 0 || (input.signals.likelyMarketing && isProductNewsletterDomain(input.senderDomain));
+  const strongSmsSignal =
+    smsHits.length > 0 ||
+    (isVoiceRelayDomain(input.senderDomain) && Boolean(input.subject?.toLowerCase().includes("text message")));
 
   const hasUnsubscribeLink = input.signals.unsubscribeLinkCount > 0;
 
@@ -170,6 +215,24 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 54;
     opportunityScore = 58;
     confidence = 88;
+  } else if (strongSmsSignal) {
+    category = Category.SMS_OR_TEXT;
+    reasons.push(`Matched SMS or relay signals: ${smsHits.join(", ") || input.senderDomain || "voice relay sender"}`);
+    urgencyScore = 38;
+    opportunityScore = input.signals.likelyMarketing ? 34 : 14;
+    confidence = 86;
+  } else if (strongSocialSignal) {
+    category = Category.SOCIAL_OR_COMMUNITY;
+    reasons.push(`Matched social or community signals: ${socialHits.join(", ") || input.senderDomain || "social sender"}`);
+    urgencyScore = 28;
+    opportunityScore = 24;
+    confidence = 84;
+  } else if (strongNewsletterSignal) {
+    category = Category.PRODUCT_OR_NEWSLETTER;
+    reasons.push(`Matched newsletter or product update signals: ${newsletterHits.join(", ") || input.senderDomain || "product sender"}`);
+    urgencyScore = 20;
+    opportunityScore = input.signals.likelyMarketing ? 30 : 18;
+    confidence = 80;
   } else if (freeTrialHits.length) {
     category = Category.FREE_TRIAL;
     reasons.push(`Matched free trial keywords: ${freeTrialHits.join(", ")}`);
@@ -341,6 +404,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       healthcareHits,
       governmentHits,
       educationHits,
+      socialHits,
+      newsletterHits,
+      smsHits,
       shoppingHits,
       jobSubjectHits,
       freeTrialHits,
@@ -377,6 +443,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
         healthcare: input.signals.healthcare,
         government: input.signals.government,
         education: input.signals.education,
+        social: input.signals.social,
+        newsletter: input.signals.newsletter,
+        sms: input.signals.sms,
         shopping: input.signals.shopping,
         shipping: input.signals.shipping,
         security: input.signals.security

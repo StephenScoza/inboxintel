@@ -289,6 +289,9 @@ function renderPage(title: string, body: string): string {
         .category-healthcare { background: linear-gradient(135deg, #10b981, #047857); }
         .category-government { background: linear-gradient(135deg, #475569, #1e293b); }
         .category-education { background: linear-gradient(135deg, #a855f7, #7e22ce); }
+        .category-social-or-community { background: linear-gradient(135deg, #ec4899, #be185d); }
+        .category-product-or-newsletter { background: linear-gradient(135deg, #06b6d4, #2563eb); }
+        .category-sms-or-text { background: linear-gradient(135deg, #22c55e, #0f766e); }
         .category-shopping { background: linear-gradient(135deg, #14b8a6, #0d9488); }
         .category-failed-payment { background: linear-gradient(135deg, #ef4444, #b91c1c); }
         .category-renewal-notice { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
