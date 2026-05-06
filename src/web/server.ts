@@ -294,6 +294,7 @@ function renderPage(title: string, body: string): string {
         .category-healthcare { background: linear-gradient(135deg, #10b981, #047857); }
         .category-government { background: linear-gradient(135deg, #475569, #1e293b); }
         .category-education { background: linear-gradient(135deg, #a855f7, #7e22ce); }
+        .category-paid-research-or-gig { background: linear-gradient(135deg, #f59e0b, #d97706); }
         .category-social-or-community { background: linear-gradient(135deg, #ec4899, #be185d); }
         .category-product-or-newsletter { background: linear-gradient(135deg, #06b6d4, #2563eb); }
         .category-sms-or-text { background: linear-gradient(135deg, #22c55e, #0f766e); }

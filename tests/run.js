@@ -201,6 +201,31 @@ const tests = [
     }
   },
   {
+    name: "keeps social-network domains in social even when posts mention items for sale",
+    run() {
+      const result = evaluateEmail({
+        subject: "Top post: I ordered patio furniture from Walmart, and they...",
+        plainTextBody: "Top post in your area. A neighbor mentioned items for sale and asked for recommendations.",
+        senderDomain: "is.email.nextdoor.com"
+      });
+
+      assert.equal(result.classification.category, Category.SOCIAL_OR_COMMUNITY);
+    }
+  },
+  {
+    name: "does not misclassify generic marketing copy as social from broad add phrasing",
+    run() {
+      const result = evaluateEmail({
+        subject: "A $100 bonus opportunity is waiting for you, Stephen",
+        plainTextBody: "Earn a bonus when you add direct deposit to your account and explore cash back benefits.",
+        senderDomain: "capitalone.com"
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.notEqual(result.classification.category, Category.SOCIAL_OR_COMMUNITY);
+    }
+  },
+  {
     name: "classifies product update emails as product or newsletter",
     run() {
       const result = evaluateEmail({
@@ -277,6 +302,48 @@ const tests = [
     }
   },
   {
+    name: "does not classify promo delivery copy as order shipping without order context",
+    run() {
+      const result = evaluateEmail({
+        subject: "Top picks delivered to your inbox",
+        plainTextBody: "Deals delivered daily. Save today on flowers and brunch gifts.",
+        senderDomain: "grouponmail.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://groupon.example/unsubscribe", domain: "groupon.example", text: "unsubscribe" }]
+      });
+
+      assert.notEqual(result.classification.category, Category.ORDER_OR_SHIPPING);
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "does not classify product review campaigns as order shipping from asset tracking phrases",
+    run() {
+      const result = evaluateEmail({
+        subject: "Unlock your rewards today",
+        plainTextBody:
+          "Help PM software newbies make good choices. Review asset tracking tools and earn a $10 Amazon gift card for every published review.",
+        senderDomain: "review.capterra.com",
+        labels: ["CATEGORY_UPDATES"],
+        links: [{ url: "https://capterra.example/unsubscribe", domain: "capterra.example", text: "unsubscribe" }]
+      });
+
+      assert.notEqual(result.classification.category, Category.ORDER_OR_SHIPPING);
+    }
+  },
+  {
+    name: "classifies informed delivery digests as shipping from postal sender context",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your Daily Digest for Wed, 5/6 is ready to view",
+        plainTextBody: "USPS Informed Delivery shows tracking updates and arriving mailpieces for your address.",
+        senderDomain: "email.informeddelivery.usps.com"
+      });
+
+      assert.equal(result.classification.category, Category.ORDER_OR_SHIPPING);
+    }
+  },
+  {
     name: "classifies promo discount emails as retail promo",
     run() {
       const result = evaluateEmail({
@@ -329,6 +396,19 @@ const tests = [
     }
   },
   {
+    name: "prefers banking over newsletter fallback for transactional finance mail",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your scheduled withdrawal is on the way",
+        plainTextBody: "Your scheduled withdrawal from your SoFi checking account is on the way. View account details.",
+        senderDomain: "mail.sofi.org"
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.notEqual(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "classifies commerce-domain marketing fallback as retail promo",
     run() {
       const result = evaluateEmail({
@@ -341,6 +421,38 @@ const tests = [
       });
 
       assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "prefers retail promo over newsletter footer language for store promotions",
+    run() {
+      const result = evaluateEmail({
+        subject: "lighting the way to savings today only",
+        plainTextBody:
+          "Check out what's new at Bath & Body Works. Shop our exclusive selection and special promotions today only.",
+        senderDomain: "e2.bathandbodyworks.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://bathandbodyworks.example/unsubscribe", domain: "bathandbodyworks.example", text: "unsubscribe" }]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+      assert.notEqual(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies cashback affiliate promotions as shopping instead of newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Viator: Up to 15% Cash Back!",
+        plainTextBody:
+          "Get up to 15% cash back. This increased cash back ends on May 10. Please note this newsletter and the offers included were valid at publication.",
+        senderDomain: "topcashback.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://topcashback.example/unsubscribe", domain: "topcashback.example", text: "unsubscribe" }]
+      });
+
+      assert.equal(result.classification.category, Category.SHOPPING);
+      assert.notEqual(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
     }
   },
   {
@@ -486,7 +598,7 @@ const tests = [
         senderDomain: "researchpanel.com"
       });
 
-      assert.equal(result.classification.category, Category.UNKNOWN);
+      assert.equal(result.classification.category, Category.PAID_RESEARCH_OR_GIG);
       assert.ok(result.classification.opportunityScore >= 85);
       assert.ok(result.classification.alertTypes.includes(AlertType.HIGH_OPPORTUNITY));
       assert.equal(result.signals.opportunity.length > 0, true);

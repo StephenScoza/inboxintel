@@ -50,6 +50,11 @@ export const CATEGORY_METADATA: Record<Category, { family: CategoryFamily; descr
     description: "School, course, tuition, financial aid, and registrar communication.",
     cssClass: "category-education"
   },
+  PAID_RESEARCH_OR_GIG: {
+    family: "WORK",
+    description: "Paid studies, market research, focus groups, participant recruiting, and gig-like opportunity mail.",
+    cssClass: "category-paid-research-or-gig"
+  },
   SOCIAL_OR_COMMUNITY: {
     family: "ENGAGEMENT",
     description: "Social networks, community updates, invites, reactions, and relationship-driven notifications.",
