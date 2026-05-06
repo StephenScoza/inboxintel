@@ -14,7 +14,10 @@ export const KEYWORDS = {
     "available balance",
     "account balance",
     "bank statement",
-    "statement is ready"
+    "statement is ready",
+    "transfer your money",
+    "instant transfer",
+    "real-time movement"
   ],
   bill: [
     "bill is ready",
@@ -80,7 +83,9 @@ export const KEYWORDS = {
     "assignment",
     "campus",
     "financial aid",
-    "registrar"
+    "registrar",
+    "alumni",
+    "commencement"
   ],
   social: [
     "invitation",
@@ -98,6 +103,9 @@ export const KEYWORDS = {
   ],
   newsletter: [
     "weekly roundup",
+    "weekly report",
+    "trend report",
+    "weekly schedule",
     "release notes",
     "product update",
     "what's new",
@@ -108,7 +116,8 @@ export const KEYWORDS = {
     "browser extension",
     "chat history",
     "daily help",
-    "gemini"
+    "gemini",
+    "privacy policy"
   ],
   sms: [
     "new text message",
@@ -197,7 +206,10 @@ export const KEYWORDS = {
     "order confirmation",
     "out for delivery",
     "shipment",
-    "arriving"
+    "arriving",
+    "pick-up order is ready",
+    "pickup order is ready",
+    "rapid pick-up order is ready"
   ],
   security: [
     "security alert",
@@ -206,7 +218,8 @@ export const KEYWORDS = {
     "suspicious activity",
     "verification code",
     "sign-in attempt",
-    "two-factor"
+    "two-factor",
+    "confirm your email address"
   ],
   subscription: [
     "subscription",
@@ -223,7 +236,14 @@ export const KEYWORDS = {
     "save today",
     "exclusive offer",
     "flash sale",
-    "ends tonight"
+    "ends tonight",
+    "deals just dropped",
+    "today only",
+    "last day",
+    "% off",
+    "just dropped",
+    "buy 3, get 1 free",
+    "buy 2, get 1 free"
   ],
   unsubscribe: ["unsubscribe", "manage preferences", "email preferences"],
   urgent: ["ends today", "expires today", "last chance", "deadline", "final reminder", "ending soon", "act now"]

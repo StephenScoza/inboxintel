@@ -227,6 +227,72 @@ const tests = [
     }
   },
   {
+    name: "classifies account confirmation emails as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "Please confirm your email address",
+        plainTextBody: "Confirm your email address to continue using your Wise account.",
+        senderDomain: "account.wise.com"
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
+      assert.ok(result.classification.urgencyScore >= 75);
+    }
+  },
+  {
+    name: "classifies banking transfer marketing as banking",
+    run() {
+      const result = evaluateEmail({
+        subject: "Transfer your money at the speed of instant",
+        plainTextBody: "No waiting, just real-time movement with instant transfer.",
+        senderDomain: "m.sofi.org"
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.ok(result.classification.confidence >= 80);
+    }
+  },
+  {
+    name: "classifies pickup ready notices as order or shipping",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your Rapid Pick-Up order is READY!",
+        plainTextBody: "All the goodness is coming your way. Your rapid pick-up order is ready.",
+        senderDomain: "m2.panerabread.com"
+      });
+
+      assert.equal(result.classification.category, Category.ORDER_OR_SHIPPING);
+    }
+  },
+  {
+    name: "classifies promo discount emails as retail promo",
+    run() {
+      const result = evaluateEmail({
+        subject: "last day for 40% off EVERYTHING!",
+        plainTextBody: "Today only. Save today with 40% off and more deals just dropped.",
+        senderDomain: "e2.bathandbodyworks.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [
+          { url: "https://brand.example/unsubscribe", domain: "brand.example", text: "unsubscribe" }
+        ]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "classifies privacy policy updates as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Update to our privacy policy and more controls",
+        plainTextBody: "We've updated our Privacy Policy and added more controls.",
+        senderDomain: "email.openai.com"
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "classifies a giveaway with opportunity and deadline alerting",
     run() {
       const result = evaluateEmail({

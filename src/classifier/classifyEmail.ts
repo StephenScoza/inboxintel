@@ -110,7 +110,7 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     return false;
   }
 
-  return ["openai.com", "proxyscrape.com", "firecrawl.dev", "firecrawl.com", "google.com"]
+  return ["openai.com", "proxyscrape.com", "firecrawl.dev", "firecrawl.com", "google.com", "paniniamerica.net"]
     .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -136,6 +136,29 @@ function detectJobSubjectSignals(subject: string | null): string[] {
     "/hr",
     "per hour"
   ]);
+}
+
+function isCommerceDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return [
+    "sephora.com",
+    "macys.com",
+    "bathandbodyworks.com",
+    "chipotle.com",
+    "coldstonecreamery.com",
+    "panerabread.com",
+    "vitacoco.com",
+    "yeezy.com",
+    "pandora.net",
+    "sneakersnstuff.com",
+    "stadiumgoods.com",
+    "steelseries.com",
+    "umusic-online.com",
+    "libertycannabis.com"
+  ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
 export function classifyEmail(input: ClassificationInput): ClassificationResult {
@@ -324,12 +347,21 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     confidence = 80;
   } else if (
     retailHits.length > 0 &&
-    (hasUnsubscribeLink || unsubscribeHits.length || input.signals.labelSignals.includes("CATEGORY_PROMOTIONS"))
+    (hasUnsubscribeLink || unsubscribeHits.length || input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") || isCommerceDomain(input.senderDomain))
   ) {
     category = Category.RETAIL_PROMO;
     reasons.push(`Matched retail promo signals: ${retailHits.join(", ")}`);
     urgencyScore = 12;
     opportunityScore = 20;
+    confidence = 82;
+  } else if (
+    shoppingHits.length > 0 &&
+    (hasUnsubscribeLink || input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") || isCommerceDomain(input.senderDomain))
+  ) {
+    category = Category.SHOPPING;
+    reasons.push(`Matched commerce shopping signals: ${[...shoppingHits, ...retailHits].filter((value, index, array) => array.indexOf(value) === index).join(", ")}`);
+    urgencyScore = 26;
+    opportunityScore = 42;
     confidence = 82;
   } else if (shoppingHits.length) {
     category = Category.SHOPPING;
