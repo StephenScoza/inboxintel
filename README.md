@@ -157,11 +157,15 @@ Available routes:
 - `/emails`
 - `/emails/:id`
 - `/senders`
+- `/mailing-lists`
 - `/subscriptions`
 - `/money-leaks`
+- `/analytics`
 - `/alerts`
 - `/classifications`
 - `/health`
+
+The `/mailing-lists` page is read-only in V1. It tracks list headers and unsubscribe targets for manual review, but it does not execute unsubscribe actions.
 
 ## 9. Classification behavior
 

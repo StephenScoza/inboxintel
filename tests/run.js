@@ -9,6 +9,10 @@ const {
 const { buildSubscriptionInsights } = require("../dist/intelligence/subscriptionInsights.js");
 const { buildAlertSuppressionKey } = require("../dist/alerts/policy.js");
 const { buildDiscordPayload } = require("../dist/alerts/discord.js");
+const {
+  buildMailingListInsights,
+  extractUnsubscribeTargets
+} = require("../dist/intelligence/mailingListInsights.js");
 const { extractHeaders } = require("../dist/parser/extractHeaders.js");
 const { sanitizeJsonString } = require("../dist/utils/safeJson.js");
 
@@ -346,6 +350,62 @@ const tests = [
       assert.equal(metadata.technicalFactsJson.hasAuthenticationResults, true);
       assert.equal(metadata.technicalFactsJson.hasListHeaders, true);
       assert.equal(metadata.technicalFactsJson.isAutoSubmitted, true);
+    }
+  },
+  {
+    name: "groups mailing list traffic and preserves unsubscribe targets",
+    run() {
+      assert.deepEqual(extractUnsubscribeTargets("<https://example.com/unsub>, <mailto:list@example.com>"), [
+        "https://example.com/unsub",
+        "mailto:list@example.com"
+      ]);
+
+      const insights = buildMailingListInsights([
+        {
+          id: "1",
+          subject: "Weekly deals",
+          senderEmail: "shop@example.com",
+          senderName: "Example Shop",
+          senderDomain: "example.com",
+          listId: "deals.example.com",
+          listUnsubscribe: "<https://example.com/unsub>, <mailto:deals@example.com>",
+          listUnsubscribePost: "List-Unsubscribe=One-Click",
+          receivedAt: new Date("2026-05-05T10:00:00Z"),
+          classification: {
+            category: Category.SHOPPING,
+            confidence: 91,
+            urgencyScore: 22,
+            opportunityScore: 61
+          }
+        },
+        {
+          id: "2",
+          subject: "Weekend deals",
+          senderEmail: "shop@example.com",
+          senderName: "Example Shop",
+          senderDomain: "example.com",
+          listId: "deals.example.com",
+          listUnsubscribe: "<https://example.com/unsub>",
+          listUnsubscribePost: null,
+          receivedAt: new Date("2026-05-06T10:00:00Z"),
+          classification: {
+            category: Category.SHOPPING,
+            confidence: 88,
+            urgencyScore: 18,
+            opportunityScore: 67
+          }
+        }
+      ]);
+
+      assert.equal(insights.length, 1);
+      assert.equal(insights[0].label, "deals.example.com");
+      assert.equal(insights[0].emailCount, 2);
+      assert.equal(insights[0].oneClickSupported, true);
+      assert.equal(insights[0].dominantCategory, Category.SHOPPING);
+      assert.deepEqual(insights[0].unsubscribeTargets, [
+        "https://example.com/unsub",
+        "mailto:deals@example.com"
+      ]);
     }
   }
 ];

@@ -1,7 +1,9 @@
 import express from "express";
 import { Category } from "@prisma/client";
 import { CATEGORY_METADATA, categoryCssClass, categoryFamily } from "../classifier/taxonomy";
+import { config } from "../config";
 import { prisma } from "../db";
+import { buildMailingListInsights } from "../intelligence/mailingListInsights";
 import { buildSenderInsights } from "../intelligence/senderInsights";
 import { buildSubscriptionInsights } from "../intelligence/subscriptionInsights";
 
@@ -49,7 +51,7 @@ function renderHero(title: string, subtitle: string): string {
         <p>${escapeHtml(subtitle)}</p>
       </div>
       <div class="hero-mark">
-        <div class="hero-icon">✉</div>
+        <div class="hero-icon">II</div>
         <div>
           <strong>Know what matters.</strong>
           <span>Every email.</span>
@@ -356,6 +358,20 @@ function renderPage(title: string, body: string): string {
           border-radius: 14px;
           padding: 14px;
         }
+        .chart-card {
+          margin-top: 12px;
+          padding: 14px;
+          border: 1px solid var(--line);
+          border-radius: 16px;
+          background: rgba(8, 13, 24, 0.75);
+          overflow-x: auto;
+        }
+        .chart-card svg {
+          width: 100%;
+          height: auto;
+          display: block;
+          min-width: 620px;
+        }
         .muted {
           color: var(--muted);
         }
@@ -382,7 +398,7 @@ function renderPage(title: string, body: string): string {
       <header>
         <div class="brandbar">
           <div class="brand">
-            <div class="brand-logo">✉</div>
+            <div class="brand-logo">II</div>
             <div class="brand-lockup">
               <div class="brand-title">Inbox<span class="intel">Intel</span></div>
               <div class="brand-tagline">Know what matters. Every email.</div>
@@ -393,6 +409,7 @@ function renderPage(title: string, body: string): string {
           <a href="/">Overview</a>
           <a href="/emails">Emails</a>
           <a href="/senders">Senders</a>
+          <a href="/mailing-lists">Mailing Lists</a>
           <a href="/subscriptions">Subscriptions</a>
           <a href="/money-leaks">Money Leaks</a>
           <a href="/analytics">Analytics</a>
@@ -420,6 +437,153 @@ function scoreClass(score: number): string {
   return "score-low";
 }
 
+function formatPercent(value: number, total: number): string {
+  if (!total) {
+    return "0%";
+  }
+
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function renderEmptyState(message: string): string {
+  return `<p class="muted">${escapeHtml(message)}</p>`;
+}
+
+function renderHorizontalBarChart(
+  items: Array<{ label: string; value: number; color?: string }>,
+  options: { height?: number; maxValue?: number; valueFormatter?: (value: number) => string } = {}
+): string {
+  if (items.length === 0) {
+    return renderEmptyState("No chart data yet.");
+  }
+
+  const barHeight = 24;
+  const gap = 18;
+  const width = 860;
+  const leftPad = 170;
+  const rightPad = 54;
+  const innerWidth = width - leftPad - rightPad;
+  const height = options.height ?? items.length * (barHeight + gap) + 10;
+  const maxValue = options.maxValue ?? Math.max(...items.map((item) => item.value), 1);
+  const valueFormatter = options.valueFormatter ?? ((value: number) => `${value}`);
+
+  const rows = items
+    .map((item, index) => {
+      const y = index * (barHeight + gap) + 10;
+      const barWidth = Math.max(4, Math.round((item.value / Math.max(maxValue, 1)) * innerWidth));
+      const color = item.color ?? "url(#barGradient)";
+
+      return `
+        <text x="${leftPad - 12}" y="${y + 16}" text-anchor="end" fill="#cbd5e1" font-size="12" font-weight="700">${escapeHtml(item.label)}</text>
+        <rect x="${leftPad}" y="${y}" width="${innerWidth}" height="${barHeight}" rx="10" fill="rgba(148, 163, 184, 0.12)" />
+        <rect x="${leftPad}" y="${y}" width="${barWidth}" height="${barHeight}" rx="10" fill="${color}" />
+        <text x="${leftPad + barWidth + 10}" y="${y + 16}" fill="#f5f7fa" font-size="12" font-weight="700">${escapeHtml(valueFormatter(item.value))}</text>
+      `;
+    })
+    .join("");
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Bar chart">
+      <defs>
+        <linearGradient id="barGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#14b8a6" />
+          <stop offset="100%" stop-color="#3b82f6" />
+        </linearGradient>
+      </defs>
+      ${rows}
+    </svg>
+  `;
+}
+
+function renderLineChart(
+  series: Array<{ label: string; values: number[]; color: string }>,
+  labels: string[]
+): string {
+  if (labels.length === 0 || series.every((entry) => entry.values.every((value) => value === 0))) {
+    return renderEmptyState("No timeline data yet.");
+  }
+
+  const width = 860;
+  const height = 280;
+  const padLeft = 40;
+  const padRight = 16;
+  const padTop = 18;
+  const padBottom = 36;
+  const innerWidth = width - padLeft - padRight;
+  const innerHeight = height - padTop - padBottom;
+  const maxValue = Math.max(1, ...series.flatMap((entry) => entry.values));
+  const stepX = labels.length > 1 ? innerWidth / (labels.length - 1) : innerWidth;
+
+  const yFor = (value: number) => padTop + innerHeight - (value / maxValue) * innerHeight;
+
+  const lines = series
+    .map((entry) => {
+      const points = entry.values
+        .map((value, index) => `${padLeft + index * stepX},${yFor(value)}`)
+        .join(" ");
+
+      const pointDots = entry.values
+        .map(
+          (value, index) =>
+            `<circle cx="${padLeft + index * stepX}" cy="${yFor(value)}" r="3.5" fill="${entry.color}" />`
+        )
+        .join("");
+
+      return `<polyline fill="none" stroke="${entry.color}" stroke-width="3" points="${points}" />${pointDots}`;
+    })
+    .join("");
+
+  const xLabels = labels
+    .map((label, index) => {
+      const x = padLeft + index * stepX;
+      return `<text x="${x}" y="${height - 10}" text-anchor="middle" fill="#94a3b8" font-size="11">${escapeHtml(label)}</text>`;
+    })
+    .join("");
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => {
+      const value = Math.round(maxValue * ratio);
+      const y = yFor(value);
+      return `
+        <line x1="${padLeft}" y1="${y}" x2="${width - padRight}" y2="${y}" stroke="rgba(148, 163, 184, 0.14)" />
+        <text x="${padLeft - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="11">${value}</text>
+      `;
+    })
+    .join("");
+
+  const legend = series
+    .map(
+      (entry, index) => `
+        <rect x="${padLeft + index * 150}" y="0" width="12" height="12" rx="6" fill="${entry.color}" />
+        <text x="${padLeft + index * 150 + 18}" y="11" fill="#cbd5e1" font-size="12" font-weight="700">${escapeHtml(entry.label)}</text>
+      `
+    )
+    .join("");
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Line chart">
+      ${legend}
+      ${yTicks}
+      ${lines}
+      ${xLabels}
+    </svg>
+  `;
+}
+
+function renderChartCard(title: string, subtitle: string, chartMarkup: string): string {
+  return `
+    <section>
+      <h3 class="section-title">${escapeHtml(title)}</h3>
+      <p class="muted">${escapeHtml(subtitle)}</p>
+      <div class="chart-card">${chartMarkup}</div>
+    </section>
+  `;
+}
+
 export function createWebServer() {
   const app = express();
 
@@ -434,7 +598,8 @@ export function createWebServer() {
       recentAlerts,
       upcomingRenewals,
       topSenders,
-      highSignalEmails
+      highSignalEmails,
+      gmailAccounts
     ] = await Promise.all([
       prisma.email.count(),
       prisma.sender.count(),
@@ -480,8 +645,19 @@ export function createWebServer() {
         },
         orderBy: { receivedAt: "desc" },
         take: 8
+      }),
+      prisma.gmailAccount.findMany({
+        orderBy: { updatedAt: "desc" },
+        take: 2
       })
     ]);
+
+    const latestSyncAt = gmailAccounts[0]?.lastSyncedAt ?? null;
+    const syncFreshnessMs = latestSyncAt ? Date.now() - latestSyncAt.getTime() : Number.POSITIVE_INFINITY;
+    const syncStatus =
+      syncFreshnessMs <= config.gmailPollIntervalMs * 2 ? "HEALTHY" :
+      syncFreshnessMs <= config.gmailPollIntervalMs * 6 ? "LAGGING" :
+      "IDLE";
 
     const alertItems = recentAlerts
       .map(
@@ -539,6 +715,8 @@ export function createWebServer() {
           <div class="summary-card"><div class="summary-label">Alerts</div><div class="summary-value">${alertCount}</div></div>
           <div class="summary-card"><div class="summary-label">High Urgency</div><div class="summary-value">${urgentEmailCount}</div></div>
           <div class="summary-card"><div class="summary-label">High Opportunity</div><div class="summary-value">${opportunityEmailCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Continuous Sync</div><div class="summary-value">${syncStatus}</div></div>
+          <div class="summary-card"><div class="summary-label">Last Sync</div><div class="summary-value">${latestSyncAt ? formatDate(latestSyncAt) : "n/a"}</div></div>
         </section>
         <div class="grid">
           <section>
@@ -943,6 +1121,119 @@ export function createWebServer() {
     );
   });
 
+  app.get("/mailing-lists", async (req, res) => {
+    const category = typeof req.query.category === "string" ? req.query.category : "";
+    const minEmails = Math.max(1, Math.min(25, Number(req.query.minEmails) || 2));
+
+    const emails = await prisma.email.findMany({
+      where: {
+        OR: [
+          { listId: { not: null } },
+          { listUnsubscribe: { not: null } }
+        ]
+      },
+      select: {
+        id: true,
+        subject: true,
+        senderEmail: true,
+        senderName: true,
+        senderDomain: true,
+        listId: true,
+        listUnsubscribe: true,
+        listUnsubscribePost: true,
+        receivedAt: true,
+        classification: {
+          select: {
+            category: true,
+            confidence: true,
+            urgencyScore: true,
+            opportunityScore: true
+          }
+        }
+      },
+      orderBy: {
+        receivedAt: "desc"
+      },
+      take: 5000
+    });
+
+    const insights = buildMailingListInsights(emails)
+      .filter((entry) => entry.emailCount >= minEmails)
+      .filter((entry) => !category || entry.dominantCategory === category);
+
+    const totalSubscriptions = insights.length;
+    const oneClickCount = insights.filter((entry) => entry.oneClickSupported).length;
+    const promoHeavyCount = insights.filter((entry) => entry.averageOpportunity >= 50).length;
+    const uniqueTargets = Array.from(new Set(insights.flatMap((entry) => entry.unsubscribeTargets))).sort();
+
+    const rows = insights
+      .slice(0, 200)
+      .map(
+        (entry) => `<tr>
+          <td>
+            <strong>${escapeHtml(entry.label)}</strong><br />
+            <span class="muted">${escapeHtml(entry.senderEmail ?? entry.senderDomain ?? "unknown")}</span>
+          </td>
+          <td>${renderCategoryPill(entry.dominantCategory)}</td>
+          <td>${entry.emailCount}</td>
+          <td>${entry.averageConfidence}</td>
+          <td><span class="score ${scoreClass(entry.averageOpportunity)}">${entry.averageOpportunity}</span></td>
+          <td>${entry.oneClickSupported ? "Yes" : "No"}</td>
+          <td>${entry.unsubscribeTargets.length}</td>
+          <td>${formatDate(entry.latestReceivedAt)}</td>
+        </tr>`
+      )
+      .join("");
+
+    const exportPreview = uniqueTargets
+      .slice(0, 25)
+      .map((target) => escapeHtml(target))
+      .join("\n");
+
+    res.send(
+      renderPage(
+        "Mailing Lists",
+        `${renderHero("Mailing list intelligence", "Track the lists and newsletters your inbox is subscribed to, see which ones are noisy or high-opportunity, and surface unsubscribe targets without modifying Gmail.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Tracked Lists</div><div class="summary-value">${totalSubscriptions}</div></div>
+          <div class="summary-card"><div class="summary-label">One-Click Ready</div><div class="summary-value">${oneClickCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Promo Heavy</div><div class="summary-value">${promoHeavyCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Unique Targets</div><div class="summary-value">${uniqueTargets.length}</div></div>
+        </section>
+        <section>
+          <h3 class="section-title">Safety note</h3>
+          <p class="muted">InboxIntel V1 remains read-only. This page helps you audit mailing lists and gather unsubscribe endpoints, but it does not execute mass unsubscribe actions. Any future unsubscribe automation should require explicit manual approval.</p>
+        </section>
+        <form method="get">
+          <select name="category">
+            <option value="">All categories</option>
+            ${Object.values(Category)
+              .map((value) => `<option value="${value}" ${value === category ? "selected" : ""}>${value}</option>`)
+              .join("")}
+          </select>
+          <select name="minEmails">
+            ${[1, 2, 3, 5, 10].map((value) => `<option value="${value}" ${value === minEmails ? "selected" : ""}>${value}+ emails</option>`).join("")}
+          </select>
+          <button type="submit">Filter Lists</button>
+        </form>
+        <div class="grid">
+          <section>
+            <h3 class="section-title">Tracked mailing lists</h3>
+            <table>
+              <thead><tr><th>List</th><th>Dominant Category</th><th>Emails</th><th>Confidence</th><th>Opportunity</th><th>One-Click</th><th>Targets</th><th>Last Seen</th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="8">No mailing lists matched this filter yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3 class="section-title">Manual unsubscribe export</h3>
+            <p class="muted">Use these targets for manual review or a future approval-based workflow. HTTP URLs and mailto targets are both preserved.</p>
+            <pre>${exportPreview || "No unsubscribe targets detected yet."}</pre>
+          </section>
+        </div>`
+      )
+    );
+  });
+
   app.get("/subscriptions", async (_req, res) => {
     const subscriptions = await prisma.subscription.findMany({
       include: {
@@ -1099,6 +1390,9 @@ export function createWebServer() {
   });
 
   app.get("/analytics", async (_req, res) => {
+    const timelineDays = 14;
+    const timelineCutoff = new Date(Date.now() - timelineDays * 24 * 60 * 60 * 1000);
+
     const [
       categoryBreakdown,
       topSenders,
@@ -1109,7 +1403,11 @@ export function createWebServer() {
       listHeaderCount,
       authResultsCount,
       autoSubmittedCount,
-      technicalAverages
+      technicalAverages,
+      recentEmails,
+      recentAlerts,
+      mailingListEmails,
+      gmailAccounts
     ] = await Promise.all([
       prisma.classification.groupBy({
         by: ["category"],
@@ -1197,6 +1495,66 @@ export function createWebServer() {
           payloadPartCount: true,
           gmailSizeEstimate: true
         }
+      }),
+      prisma.email.findMany({
+        where: {
+          receivedAt: {
+            gte: timelineCutoff
+          }
+        },
+        select: {
+          receivedAt: true,
+          classification: {
+            select: {
+              urgencyScore: true,
+              opportunityScore: true
+            }
+          }
+        }
+      }),
+      prisma.alert.findMany({
+        where: {
+          createdAt: {
+            gte: timelineCutoff
+          }
+        },
+        select: {
+          createdAt: true
+        }
+      }),
+      prisma.email.findMany({
+        where: {
+          OR: [
+            { listId: { not: null } },
+            { listUnsubscribe: { not: null } }
+          ]
+        },
+        select: {
+          id: true,
+          subject: true,
+          senderEmail: true,
+          senderName: true,
+          senderDomain: true,
+          listId: true,
+          listUnsubscribe: true,
+          listUnsubscribePost: true,
+          receivedAt: true,
+          classification: {
+            select: {
+              category: true,
+              confidence: true,
+              urgencyScore: true,
+              opportunityScore: true
+            }
+          }
+        },
+        take: 5000
+      }),
+      prisma.gmailAccount.findMany({
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 2
       })
     ]);
 
@@ -1224,6 +1582,7 @@ export function createWebServer() {
         ([family, count]) => `<div class="stat">
           <strong>${escapeHtml(family)}</strong>
           <p>Emails: ${count}</p>
+          <p class="muted">${formatPercent(count, trackedEmailCount)} of mailbox</p>
         </div>`
       )
       .join("");
@@ -1251,31 +1610,121 @@ export function createWebServer() {
       )
       .join("");
 
+    const topCategoryChart = renderHorizontalBarChart(
+      categoryBreakdown.slice(0, 8).map((entry) => ({
+        label: entry.category.replaceAll("_", " "),
+        value: entry._count.category
+      })),
+      {
+        valueFormatter: (value) => `${formatCompactNumber(value)} emails`
+      }
+    );
+
+    const familyChart = renderHorizontalBarChart(
+      Array.from(familySummary.entries())
+        .sort((left, right) => right[1] - left[1])
+        .map(([family, count]) => ({
+          label: family,
+          value: count
+        })),
+      {
+        valueFormatter: (value) => `${formatPercent(value, trackedEmailCount)}`
+      }
+    );
+
+    const timelineLabels = Array.from({ length: timelineDays }, (_, index) => {
+      const date = new Date(timelineCutoff.getTime() + index * 24 * 60 * 60 * 1000);
+      return date.toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
+    });
+    const timelineBuckets = timelineLabels.map(() => ({ emails: 0, urgent: 0, alerts: 0 }));
+
+    const bucketIndexFor = (date: Date) => {
+      const diff = date.getTime() - timelineCutoff.getTime();
+      return Math.floor(diff / (24 * 60 * 60 * 1000));
+    };
+
+    for (const email of recentEmails) {
+      if (!email.receivedAt) {
+        continue;
+      }
+
+      const index = bucketIndexFor(email.receivedAt);
+      if (index < 0 || index >= timelineBuckets.length) {
+        continue;
+      }
+
+      timelineBuckets[index].emails += 1;
+      if ((email.classification?.urgencyScore ?? 0) >= 75) {
+        timelineBuckets[index].urgent += 1;
+      }
+    }
+
+    for (const alert of recentAlerts) {
+      const index = bucketIndexFor(alert.createdAt);
+      if (index < 0 || index >= timelineBuckets.length) {
+        continue;
+      }
+      timelineBuckets[index].alerts += 1;
+    }
+
+    const timelineChart = renderLineChart(
+      [
+        { label: "Emails", values: timelineBuckets.map((entry) => entry.emails), color: "#3b82f6" },
+        { label: "Urgent", values: timelineBuckets.map((entry) => entry.urgent), color: "#ef4444" },
+        { label: "Alerts", values: timelineBuckets.map((entry) => entry.alerts), color: "#14b8a6" }
+      ],
+      timelineLabels
+    );
+
+    const mailingListInsights = buildMailingListInsights(mailingListEmails);
+    const mailingListChart = renderHorizontalBarChart(
+      mailingListInsights.slice(0, 8).map((entry) => ({
+        label: entry.label.length > 28 ? `${entry.label.slice(0, 28)}…` : entry.label,
+        value: entry.emailCount
+      })),
+      {
+        valueFormatter: (value) => `${value} msgs`
+      }
+    );
+
+    const latestSyncAt = gmailAccounts[0]?.lastSyncedAt ?? null;
+    const syncFreshnessMs = latestSyncAt ? Date.now() - latestSyncAt.getTime() : Number.POSITIVE_INFINITY;
+    const syncStatus =
+      syncFreshnessMs <= config.gmailPollIntervalMs * 2 ? "HEALTHY" :
+      syncFreshnessMs <= config.gmailPollIntervalMs * 6 ? "LAGGING" :
+      "IDLE";
+
     res.send(
       renderPage(
         "Analytics",
-        `${renderHero("Mailbox analytics", "Inspect how InboxIntel is classifying the inbox, which senders dominate, and where urgency and opportunity are clustering after larger ingest runs.")}
+        `${renderHero("Mailbox analytics", "Inspect how InboxIntel is classifying the inbox, where mailing-list volume is clustering, and whether the continuous sync worker is keeping the local dataset fresh.")}
         <section class="summary-grid">
           <div class="summary-card"><div class="summary-label">Tracked Categories</div><div class="summary-value">${categoryBreakdown.length}</div></div>
           <div class="summary-card"><div class="summary-label">High Urgency Emails</div><div class="summary-value">${urgentCount}</div></div>
           <div class="summary-card"><div class="summary-label">High Opportunity Emails</div><div class="summary-value">${opportunityCount}</div></div>
           <div class="summary-card"><div class="summary-label">Alert Signatures</div><div class="summary-value">${recentAlertBreakdown.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Sync Status</div><div class="summary-value">${syncStatus}</div></div>
+          <div class="summary-card"><div class="summary-label">Last Sync</div><div class="summary-value">${latestSyncAt ? formatDate(latestSyncAt) : "n/a"}</div></div>
         </section>
         <div class="grid">
+          ${renderChartCard("Volume timeline", `Last ${timelineDays} days of received email volume, urgent classifications, and generated alerts.`, timelineChart)}
+          ${renderChartCard("Top categories", "Largest classification buckets in the current mailbox sample.", topCategoryChart)}
+          ${renderChartCard("Category families", "How the taxonomy is balancing finance, commerce, life, work, engagement, and system-level email.", familyChart)}
+          ${renderChartCard("Mailing list volume", "Top tracked mailing lists by message count, using List-Id and List-Unsubscribe headers where available.", mailingListChart)}
           <section>
             <h3 class="section-title">Technical coverage</h3>
             <div class="stats">
               <div class="stat"><strong>Tracked emails</strong><p>${trackedEmailCount}</p></div>
-              <div class="stat"><strong>List-Unsubscribe</strong><p>${listHeaderCount}</p></div>
-              <div class="stat"><strong>Auth results</strong><p>${authResultsCount}</p></div>
+              <div class="stat"><strong>List-Unsubscribe</strong><p>${listHeaderCount}</p><p class="muted">${formatPercent(listHeaderCount, trackedEmailCount)}</p></div>
+              <div class="stat"><strong>Auth results</strong><p>${authResultsCount}</p><p class="muted">${formatPercent(authResultsCount, trackedEmailCount)}</p></div>
               <div class="stat"><strong>Auto-submitted</strong><p>${autoSubmittedCount}</p></div>
               <div class="stat"><strong>Avg MIME parts</strong><p>${Math.round(technicalAverages._avg.payloadPartCount ?? 0)}</p></div>
-              <div class="stat"><strong>Avg Gmail size</strong><p>${Math.round(technicalAverages._avg.gmailSizeEstimate ?? 0)} bytes</p></div>
+              <div class="stat"><strong>Avg Gmail size</strong><p>${formatCompactNumber(Math.round(technicalAverages._avg.gmailSizeEstimate ?? 0))} bytes</p></div>
             </div>
           </section>
           <section>
             <h3 class="section-title">Category families</h3>
-            <div class="stats">${familyCards || "<p>No taxonomy data yet.</p>"}</div>
+            <div class="stats">${familyCards || renderEmptyState("No taxonomy data yet.")}</div>
           </section>
           <section>
             <h3 class="section-title">Category distribution</h3>
