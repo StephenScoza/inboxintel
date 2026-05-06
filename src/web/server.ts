@@ -1781,6 +1781,20 @@ export function createWebServer() {
       take: 2000
     });
 
+    const suspiciousReviews: Array<{
+      emailId: string;
+      subject: string | null;
+      senderEmail: string | null;
+      senderDomain: string | null;
+      category: Category;
+      confidence: number;
+      urgencyScore: number;
+      opportunityScore: number;
+      reasons: string[];
+      suspicionScore: number;
+      suspicionReasons: string[];
+    }> = [];
+
     const reviewByCategory = new Map<
       Category,
       {
@@ -1834,6 +1848,56 @@ export function createWebServer() {
       }
 
       reviewByCategory.set(classification.category, current);
+
+      const suspicionReasons: string[] = [];
+      const signals = typeof classification.signalsJson === "object" && classification.signalsJson
+        ? (classification.signalsJson as Record<string, unknown>)
+        : {};
+      const likelyMarketing = signals.likelyMarketing === true;
+      const likelyTransactional = signals.likelyTransactional === true;
+      const family = CATEGORY_METADATA[classification.category].family;
+      let suspicionScore = 0;
+
+      if (classification.confidence < 72) {
+        suspicionScore += 35 + (72 - classification.confidence);
+        suspicionReasons.push(`Low confidence ${classification.confidence}`);
+      }
+
+      if (likelyMarketing && ["FINANCE", "LIFE", "WORK"].includes(family)) {
+        suspicionScore += 24;
+        suspicionReasons.push("Marketing-style email in non-marketing family");
+      }
+
+      if (likelyTransactional && ["RETAIL_PROMO", "SHOPPING", "PRODUCT_OR_NEWSLETTER"].includes(classification.category)) {
+        suspicionScore += 22;
+        suspicionReasons.push("Transactional-style email in promo/newsletter bucket");
+      }
+
+      if (classification.urgencyScore >= 70 && classification.confidence < 80) {
+        suspicionScore += 12;
+        suspicionReasons.push("High urgency with weaker confidence");
+      }
+
+      if (classification.opportunityScore >= 70 && classification.confidence < 80) {
+        suspicionScore += 10;
+        suspicionReasons.push("High opportunity with weaker confidence");
+      }
+
+      if (suspicionScore > 0) {
+        suspiciousReviews.push({
+          emailId: classification.email.id,
+          subject: classification.email.subject,
+          senderEmail: classification.email.senderEmail,
+          senderDomain: classification.email.senderDomain,
+          category: classification.category,
+          confidence: classification.confidence,
+          urgencyScore: classification.urgencyScore,
+          opportunityScore: classification.opportunityScore,
+          reasons: classification.reasons.slice(0, 3),
+          suspicionScore,
+          suspicionReasons
+        });
+      }
     }
 
     const categoryRows = Object.values(Category)
@@ -1912,6 +1976,45 @@ export function createWebServer() {
     const totalClassified = classifications.length;
     const lowConfidenceTotal = classifications.filter((entry) => entry.confidence < 70).length;
     const urgentTotal = classifications.filter((entry) => entry.urgencyScore >= 75).length;
+    const suspiciousQueue = suspiciousReviews
+      .sort((left, right) => {
+        if (right.suspicionScore !== left.suspicionScore) {
+          return right.suspicionScore - left.suspicionScore;
+        }
+
+        return left.confidence - right.confidence;
+      })
+      .slice(0, 30);
+
+    const suspiciousRows = suspiciousQueue
+      .map(
+        (entry) => `<tr>
+          <td><a href="/emails/${entry.emailId}">${escapeHtml(entry.subject ?? "(no subject)")}</a></td>
+          <td>${escapeHtml(entry.senderEmail ?? entry.senderDomain ?? "unknown")}</td>
+          <td>${renderCategoryPill(entry.category)}</td>
+          <td>${entry.confidence}</td>
+          <td>${entry.urgencyScore}</td>
+          <td>${entry.opportunityScore}</td>
+          <td>${entry.suspicionScore}</td>
+          <td><span class="muted">${escapeHtml(entry.suspicionReasons.join(" | "))}</span><br/>${escapeHtml(entry.reasons.join(" | "))}</td>
+        </tr>`
+      )
+      .join("");
+
+    const suspiciousCategoryChart = renderHorizontalBarChart(
+      Array.from(
+        suspiciousQueue.reduce((map, entry) => {
+          map.set(entry.category, (map.get(entry.category) ?? 0) + 1);
+          return map;
+        }, new Map<Category, number>())
+      ).map(([category, count]) => ({
+        label: category.replaceAll("_", " "),
+        value: count
+      })),
+      {
+        valueFormatter: (value) => `${value} flagged`
+      }
+    );
 
     res.send(
       renderPage(
@@ -1922,10 +2025,19 @@ export function createWebServer() {
           <div class="summary-card"><div class="summary-label">Taxonomy Buckets</div><div class="summary-value">${Object.values(Category).length}</div></div>
           <div class="summary-card"><div class="summary-label">Low Confidence</div><div class="summary-value">${lowConfidenceTotal}</div></div>
           <div class="summary-card"><div class="summary-label">High Urgency</div><div class="summary-value">${urgentTotal}</div></div>
+          <div class="summary-card"><div class="summary-label">Review Queue</div><div class="summary-value">${suspiciousQueue.length}</div></div>
         </section>
         <div class="grid">
           ${renderChartCard("Low-confidence hotspots", "Categories with the most emails scoring below 70 confidence are usually the best candidates for the next rule pass.", lowConfidenceChart)}
           ${renderChartCard("Average confidence by category", "A quick precision view across the whole taxonomy.", confidenceChart)}
+          ${renderChartCard("Flagged review queue", "These are the categories currently surfacing the most suspicious classifications in the review queue below.", suspiciousCategoryChart)}
+          <section>
+            <h3 class="section-title">Flagged emails to review next</h3>
+            <table>
+              <thead><tr><th>Email</th><th>Sender</th><th>Category</th><th>Conf</th><th>Urgency</th><th>Opportunity</th><th>Review Score</th><th>Why flagged</th></tr></thead>
+              <tbody>${suspiciousRows || `<tr><td colspan="8">${renderEmptyState("No suspicious emails are currently flagged.")}</td></tr>`}</tbody>
+            </table>
+          </section>
           <section>
             <h3 class="section-title">Category audit table</h3>
             <table>
