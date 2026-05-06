@@ -9,6 +9,7 @@ const {
 const { buildSubscriptionInsights } = require("../dist/intelligence/subscriptionInsights.js");
 const { buildAlertSuppressionKey } = require("../dist/alerts/policy.js");
 const { buildDiscordPayload } = require("../dist/alerts/discord.js");
+const { sanitizeJsonString } = require("../dist/utils/safeJson.js");
 
 function evaluateEmail(overrides = {}) {
   return buildEmailIntelligence({
@@ -71,6 +72,20 @@ const tests = [
     }
   },
   {
+    name: "classifies scheduled withdrawals as banking instead of government",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your scheduled withdrawal is on the way",
+        plainTextBody: "Your scheduled withdrawal from your SoFi checking account is on the way.",
+        senderDomain: "o.sofi.org"
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.equal(result.signals.banking.length > 0, true);
+      assert.equal(result.signals.government.length, 0);
+    }
+  },
+  {
     name: "classifies bill and utility reminders",
     run() {
       const result = evaluateEmail({
@@ -104,6 +119,27 @@ const tests = [
       assert.equal(result.classification.category, Category.RETAIL_PROMO);
       assert.ok(result.classification.opportunityScore <= 25);
       assert.equal(result.signals.unsubscribeLinkCount, 1);
+    }
+  },
+  {
+    name: "does not classify brand promo email as government",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your Cinco de Mayo lineup",
+        plainTextBody: "Shop now for your Cinco de Mayo lineup. New arrivals available today.",
+        senderDomain: "vitacoco.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [
+          {
+            url: "https://vitacoco.com/unsubscribe",
+            domain: "vitacoco.com",
+            text: "unsubscribe"
+          }
+        ]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+      assert.equal(result.signals.government.length, 0);
     }
   },
   {
@@ -241,6 +277,12 @@ const tests = [
       assert.ok(result.classification.opportunityScore >= 85);
       assert.ok(result.classification.alertTypes.includes(AlertType.HIGH_OPPORTUNITY));
       assert.equal(result.signals.opportunity.length > 0, true);
+    }
+  },
+  {
+    name: "sanitizes invalid json-style hex escapes from payload strings",
+    run() {
+      assert.equal(sanitizeJsonString(String.raw`bad \x escape`), String.raw`bad \\x escape`);
     }
   }
 ];

@@ -3,6 +3,7 @@ dist
 .git
 .gitignore
 tokens
+logs
 .env
 postgres-data
 npm-debug.log

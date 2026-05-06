@@ -13,6 +13,8 @@ import {
 import { cleanSenderName, deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { extractBody } from "../parser/extractBody";
 import { extractLinks } from "../parser/extractLinks";
+import { logger } from "../utils/logger";
+import { sanitizeJsonValue, sanitizeText } from "../utils/safeJson";
 
 function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | null {
   const header = headers?.find((entry) => entry.name?.toLowerCase() === name.toLowerCase());
@@ -61,8 +63,18 @@ interface ProcessContext {
   gmailAccountEmail: string;
 }
 
+function isPrismaInvalidArgError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "InvalidArg"
+  );
+}
+
 export async function processEmail(message: gmail_v1.Schema$Message, context: ProcessContext) {
   if (!message.id) {
+    logger.warn("Skipping Gmail message without id");
     return { skipped: true, reason: "missing-message-id" };
   }
 
@@ -71,12 +83,16 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   });
 
   if (existing) {
+    logger.info("Skipping duplicate Gmail message", {
+      gmailMessageId: message.id,
+      emailId: existing.id
+    });
     return { skipped: true, reason: "duplicate" };
   }
 
   const payload = message.payload;
   const headers = payload?.headers ?? [];
-  const subject = getHeader(headers, "Subject");
+  const subject = sanitizeText(getHeader(headers, "Subject")) ?? null;
   const rawSender = getHeader(headers, "From");
   const receivedHeader = getHeader(headers, "Date");
   const senderMeta = parseSender(rawSender);
@@ -85,8 +101,14 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     : receivedHeader
       ? new Date(receivedHeader)
       : null;
-  const { plainTextBody, htmlBody } = extractBody(payload);
-  const links = extractLinks(plainTextBody, htmlBody);
+  const extractedBody = extractBody(payload);
+  const plainTextBody = sanitizeText(extractedBody.plainTextBody) ?? null;
+  const htmlBody = sanitizeText(extractedBody.htmlBody) ?? null;
+  const links = extractLinks(plainTextBody, htmlBody).map((link) => ({
+    url: sanitizeText(link.url) ?? link.url,
+    domain: sanitizeText(link.domain) ?? null,
+    text: sanitizeText(link.text) ?? null
+  }));
   const intelligence = buildEmailIntelligence({
     subject,
     snippet: message.snippet ?? null,
@@ -114,47 +136,182 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
       })
     : null;
 
-  const email = await prisma.email.create({
-    data: {
+  const richEmailData = {
+    gmailMessageId: message.id,
+    gmailThreadId: message.threadId ?? null,
+    gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
+    gmailLabels: message.labelIds ?? [],
+    senderRaw: sanitizeText(senderMeta.senderRaw) ?? null,
+    senderName: senderMeta.senderName,
+    senderEmail: senderMeta.senderEmail,
+    senderDomain: senderMeta.senderDomain,
+    subject,
+    snippet: sanitizeText(message.snippet ?? null) ?? null,
+    receivedAt,
+    rawPayload: undefined,
+    amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
+    datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue,
+    gmailAccountId: context.gmailAccountId,
+    senderId: sender?.id ?? null
+  };
+
+  const classificationData = {
+    category: intelligence.classification.category,
+    confidence: intelligence.classification.confidence,
+    urgencyScore: intelligence.classification.urgencyScore,
+    opportunityScore: intelligence.classification.opportunityScore,
+    reasons: intelligence.classification.reasons,
+    signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+  };
+
+  const minimalEmailData = {
+    gmailMessageId: message.id,
+    gmailThreadId: message.threadId ?? null,
+    gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
+    gmailLabels: message.labelIds ?? [],
+    senderName: senderMeta.senderName,
+    senderEmail: senderMeta.senderEmail,
+    senderDomain: senderMeta.senderDomain,
+    subject,
+    receivedAt,
+    gmailAccountId: context.gmailAccountId,
+    senderId: sender?.id ?? null
+  };
+
+  const skeletalEmailData = {
+    gmailMessageId: message.id,
+    gmailThreadId: message.threadId ?? null,
+    gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
+    gmailLabels: message.labelIds ?? [],
+    receivedAt,
+    gmailAccountId: context.gmailAccountId,
+    senderId: sender?.id ?? null
+  };
+
+  let email;
+  try {
+    email = await prisma.email.create({
+      data: {
+        ...richEmailData,
+        plainTextBody,
+        htmlBody
+      },
+      include: {
+        classification: true
+      }
+    });
+  } catch (error) {
+    if (!isPrismaInvalidArgError(error)) {
+      logger.error("Email create failed before fallback", {
+        gmailMessageId: message.id,
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+      throw error;
+    }
+
+    logger.warn("Falling back to minimal email storage for Gmail message", {
       gmailMessageId: message.id,
-      gmailThreadId: message.threadId ?? null,
-      gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
-      gmailLabels: message.labelIds ?? [],
-      senderRaw: senderMeta.senderRaw,
-      senderName: senderMeta.senderName,
-      senderEmail: senderMeta.senderEmail,
-      senderDomain: senderMeta.senderDomain,
-      subject,
-      snippet: message.snippet ?? null,
-      receivedAt,
-      plainTextBody,
-      htmlBody,
-      rawPayload: payload as unknown as Prisma.InputJsonValue,
-      amountsJson: intelligence.amounts as unknown as Prisma.InputJsonValue,
-      datesJson: intelligence.dates as unknown as Prisma.InputJsonValue,
-      gmailAccountId: context.gmailAccountId,
-      senderId: sender?.id ?? null,
-      links: {
-        create: links.map((link) => ({
+      sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
+      subject
+    });
+    try {
+      email = await prisma.email.create({
+        data: minimalEmailData,
+        include: {
+          classification: true
+        }
+      });
+    } catch (fallbackError) {
+      if (!isPrismaInvalidArgError(fallbackError)) {
+        logger.error("Minimal fallback email create failed", {
+          gmailMessageId: message.id,
+          error: fallbackError instanceof Error ? fallbackError.message : "Unknown error"
+        });
+        throw fallbackError;
+      }
+
+      logger.warn("Escalating to skeletal email storage for Gmail message", {
+        gmailMessageId: message.id,
+        sender: senderMeta.senderEmail ?? senderMeta.senderRaw
+      });
+      email = await prisma.email.create({
+        data: skeletalEmailData,
+        include: {
+          classification: true
+        }
+      });
+    }
+  }
+
+  try {
+    await prisma.classification.create({
+      data: {
+        emailId: email.id,
+        ...classificationData
+      }
+    });
+  } catch (error) {
+    if (!isPrismaInvalidArgError(error)) {
+      logger.error("Classification create failed", {
+        gmailMessageId: message.id,
+        emailId: email.id,
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+      throw error;
+    }
+
+    logger.warn("Falling back to minimal classification storage for Gmail message", {
+      gmailMessageId: message.id,
+      emailId: email.id
+    });
+    await prisma.classification.create({
+      data: {
+        emailId: email.id,
+        category: intelligence.classification.category,
+        confidence: intelligence.classification.confidence,
+        urgencyScore: intelligence.classification.urgencyScore,
+        opportunityScore: intelligence.classification.opportunityScore,
+        reasons: intelligence.classification.reasons,
+        signalsJson: Prisma.JsonNull
+      }
+    });
+    email.classification = null;
+  }
+
+  for (const link of links) {
+    try {
+      await prisma.emailLink.create({
+        data: {
+          emailId: email.id,
           url: link.url,
           domain: link.domain,
           text: link.text
-        }))
-      },
-      classification: {
-        create: {
-          category: intelligence.classification.category,
-          confidence: intelligence.classification.confidence,
-          urgencyScore: intelligence.classification.urgencyScore,
-          opportunityScore: intelligence.classification.opportunityScore,
-          reasons: intelligence.classification.reasons,
-          signalsJson: intelligence.classification.signals as unknown as Prisma.InputJsonValue
         }
+      });
+    } catch (error) {
+      if (!isPrismaInvalidArgError(error)) {
+        logger.error("Email link create failed", {
+          gmailMessageId: message.id,
+          emailId: email.id,
+          url: link.url,
+          error: error instanceof Error ? error.message : "Unknown error"
+        });
+        throw error;
       }
-    },
-    include: {
-      classification: true
+
+      logger.warn("Skipping malformed email link", {
+        gmailMessageId: message.id,
+        emailId: email.id,
+        url: link.url
+      });
     }
+  }
+
+  logger.info("Stored Gmail message", {
+    gmailMessageId: message.id,
+    emailId: email.id,
+    category: intelligence.classification.category,
+    subject
   });
 
   if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
@@ -241,12 +398,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           urgencyScore: intelligence.classification.urgencyScore,
           opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: "suppressed",
-          payloadJson: {
+          payloadJson: sanitizeJsonValue({
             suppressed: true,
             senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
             suppressionKey: suppression.suppressionKey,
             existingAlertId: suppression.existingAlertId
-          } as unknown as Prisma.InputJsonValue
+          }) as unknown as Prisma.InputJsonValue
         }
       });
       continue;
@@ -279,11 +436,11 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
-          payloadJson: {
+          payloadJson: sanitizeJsonValue({
             ...((delivery.payloadJson as unknown) as Record<string, unknown>),
             senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
             suppressionKey: suppression.suppressionKey
-          } as unknown as Prisma.InputJsonValue
+          }) as unknown as Prisma.InputJsonValue
         }
       });
     } catch (error) {
@@ -297,11 +454,11 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           urgencyScore: intelligence.classification.urgencyScore,
           opportunityScore: intelligence.classification.opportunityScore,
           webhookTarget: "delivery-failed",
-          payloadJson: {
+          payloadJson: sanitizeJsonValue({
             error: error instanceof Error ? error.message : "Unknown delivery error",
             senderKey: senderMeta.senderEmail ?? senderMeta.senderRaw,
             suppressionKey: suppression.suppressionKey
-          } as unknown as Prisma.InputJsonValue
+          }) as unknown as Prisma.InputJsonValue
         }
       });
     }

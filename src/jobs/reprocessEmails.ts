@@ -10,6 +10,7 @@ import {
 import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
 import { deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { sendDiscordAlert } from "../alerts/discord";
+import { sanitizeJsonValue } from "../utils/safeJson";
 
 async function maybeCreateAlertsForReprocessedEmail(params: {
   emailId: string;
@@ -56,13 +57,13 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
           urgencyScore: params.classification.urgencyScore,
           opportunityScore: params.classification.opportunityScore,
           webhookTarget: "suppressed",
-          payloadJson: {
+          payloadJson: sanitizeJsonValue({
             suppressed: true,
             senderKey: params.sender,
             suppressionKey: suppression.suppressionKey,
             existingAlertId: suppression.existingAlertId,
             reprocessed: true
-          } as unknown as Prisma.InputJsonValue
+          }) as unknown as Prisma.InputJsonValue
         }
       });
       continue;
@@ -95,12 +96,12 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
           opportunityScore: params.classification.opportunityScore,
           webhookTarget: delivery.webhookTarget,
           deliveredAt: delivery.deliveredAt,
-          payloadJson: {
+          payloadJson: sanitizeJsonValue({
             ...((delivery.payloadJson as unknown) as Record<string, unknown>),
             senderKey: params.sender,
             suppressionKey: suppression.suppressionKey,
             reprocessed: true
-          } as unknown as Prisma.InputJsonValue
+          }) as unknown as Prisma.InputJsonValue
         }
       });
     } catch (error) {
@@ -114,12 +115,12 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
           urgencyScore: params.classification.urgencyScore,
           opportunityScore: params.classification.opportunityScore,
           webhookTarget: "delivery-failed",
-          payloadJson: {
+          payloadJson: sanitizeJsonValue({
             error: error instanceof Error ? error.message : "Unknown delivery error",
             reprocessed: true,
             senderKey: params.sender,
             suppressionKey: suppression.suppressionKey
-          } as unknown as Prisma.InputJsonValue
+          }) as unknown as Prisma.InputJsonValue
         }
       });
     }
@@ -167,7 +168,7 @@ export async function runReprocess(limit?: number) {
         urgencyScore: intelligence.classification.urgencyScore,
         opportunityScore: intelligence.classification.opportunityScore,
         reasons: intelligence.classification.reasons,
-        signalsJson: intelligence.classification.signals as unknown as Prisma.InputJsonValue
+        signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
       },
       create: {
         emailId: email.id,
@@ -176,15 +177,15 @@ export async function runReprocess(limit?: number) {
         urgencyScore: intelligence.classification.urgencyScore,
         opportunityScore: intelligence.classification.opportunityScore,
         reasons: intelligence.classification.reasons,
-        signalsJson: intelligence.classification.signals as unknown as Prisma.InputJsonValue
+        signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
       }
     });
 
     await prisma.email.update({
       where: { id: email.id },
       data: {
-        amountsJson: intelligence.amounts as unknown as Prisma.InputJsonValue,
-        datesJson: intelligence.dates as unknown as Prisma.InputJsonValue
+        amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
+        datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
       }
     });
 
