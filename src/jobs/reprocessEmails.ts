@@ -10,7 +10,17 @@ import {
 import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
 import { deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { sendDiscordAlert } from "../alerts/discord";
+import { logger } from "../utils/logger";
 import { sanitizeJsonValue } from "../utils/safeJson";
+
+function isPrismaInvalidArgError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "InvalidArg"
+  );
+}
 
 async function maybeCreateAlertsForReprocessedEmail(params: {
   emailId: string;
@@ -158,36 +168,87 @@ export async function runReprocess(limit?: number) {
       }))
     });
 
-    await prisma.classification.upsert({
-      where: {
-        emailId: email.id
-      },
-      update: {
-        category: intelligence.classification.category,
-        confidence: intelligence.classification.confidence,
-        urgencyScore: intelligence.classification.urgencyScore,
-        opportunityScore: intelligence.classification.opportunityScore,
-        reasons: intelligence.classification.reasons,
-        signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
-      },
-      create: {
-        emailId: email.id,
-        category: intelligence.classification.category,
-        confidence: intelligence.classification.confidence,
-        urgencyScore: intelligence.classification.urgencyScore,
-        opportunityScore: intelligence.classification.opportunityScore,
-        reasons: intelligence.classification.reasons,
-        signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+    try {
+      await prisma.classification.upsert({
+        where: {
+          emailId: email.id
+        },
+        update: {
+          category: intelligence.classification.category,
+          confidence: intelligence.classification.confidence,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
+          reasons: intelligence.classification.reasons,
+          signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+        },
+        create: {
+          emailId: email.id,
+          category: intelligence.classification.category,
+          confidence: intelligence.classification.confidence,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
+          reasons: intelligence.classification.reasons,
+          signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+        }
+      });
+    } catch (error) {
+      if (!isPrismaInvalidArgError(error)) {
+        throw error;
       }
-    });
 
-    await prisma.email.update({
-      where: { id: email.id },
-      data: {
-        amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
-        datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
+      logger.warn("Falling back to minimal classification storage during reprocess", {
+        emailId: email.id,
+        gmailMessageId: email.gmailMessageId
+      });
+      await prisma.classification.upsert({
+        where: {
+          emailId: email.id
+        },
+        update: {
+          category: intelligence.classification.category,
+          confidence: intelligence.classification.confidence,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
+          reasons: intelligence.classification.reasons,
+          signalsJson: Prisma.JsonNull
+        },
+        create: {
+          emailId: email.id,
+          category: intelligence.classification.category,
+          confidence: intelligence.classification.confidence,
+          urgencyScore: intelligence.classification.urgencyScore,
+          opportunityScore: intelligence.classification.opportunityScore,
+          reasons: intelligence.classification.reasons,
+          signalsJson: Prisma.JsonNull
+        }
+      });
+    }
+
+    try {
+      await prisma.email.update({
+        where: { id: email.id },
+        data: {
+          amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
+          datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
+        }
+      });
+    } catch (error) {
+      if (!isPrismaInvalidArgError(error)) {
+        throw error;
       }
-    });
+
+      logger.warn("Falling back to minimal extracted payload storage during reprocess", {
+        emailId: email.id,
+        gmailMessageId: email.gmailMessageId
+      });
+      await prisma.email.update({
+        where: { id: email.id },
+        data: {
+          amountsJson: Prisma.JsonNull,
+          datesJson: Prisma.JsonNull
+        }
+      });
+    }
 
     if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
       const vendor = deriveVendorIdentity(email.senderName, email.senderEmail, email.senderDomain);

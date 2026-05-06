@@ -2,6 +2,7 @@ import { AlertType, Category } from "@prisma/client";
 import { ExtractedAmount } from "../parser/extractAmounts";
 import { ExtractedDate } from "../parser/extractDates";
 import { ExtractedSignals } from "../parser/extractSignals";
+import { containsAny } from "./rules";
 
 export interface ClassificationInput {
   subject: string | null;
@@ -53,14 +54,67 @@ function detectClosestDate(dates: ExtractedDate[]): { iso: string; daysUntil: nu
   return enriched[0] ?? null;
 }
 
+function isJobPlatformDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return [
+    "linkedin.com",
+    "linkedinmail.com",
+    "indeed.com",
+    "indeedemail.com",
+    "greenhouse.io",
+    "lever.co",
+    "myworkdayjobs.com",
+    "workday.com",
+    "ashbyhq.com",
+    "smartrecruiters.com",
+    "jobvite.com",
+    "ziprecruiter.com",
+    "dice.com",
+    "wellfound.com",
+    "angel.co"
+  ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function detectJobSubjectSignals(subject: string | null): string[] {
+  if (!subject) {
+    return [];
+  }
+
+  return containsAny(subject, [
+    "software engineer",
+    "full stack engineer",
+    "full-stack engineer",
+    "frontend engineer",
+    "backend engineer",
+    "web developer",
+    "javascript developer",
+    "typescript developer",
+    "product manager",
+    "data analyst",
+    "remote",
+    "hiring",
+    "salary",
+    "/hr",
+    "per hour"
+  ]);
+}
+
 export function classifyEmail(input: ClassificationInput): ClassificationResult {
   const bankingHits = input.signals.banking.map((match) => match.phrase);
   const billHits = input.signals.bill.map((match) => match.phrase);
   const travelHits = input.signals.travel.map((match) => match.phrase);
   const jobHits = input.signals.job.map((match) => match.phrase);
+  const jobSubjectHits = detectJobSubjectSignals(input.subject);
+  const strongJobSignal =
+    jobSubjectHits.length > 0 ||
+    (jobHits.length > 0 && (jobSubjectHits.length > 0 || isJobPlatformDomain(input.senderDomain)));
   const healthcareHits = input.signals.healthcare.map((match) => match.phrase);
   const governmentHits = input.signals.government.map((match) => match.phrase);
   const educationHits = input.signals.education.map((match) => match.phrase);
+  const shoppingHits = input.signals.shopping.map((match) => match.phrase);
   const freeTrialHits = input.signals.freeTrial.map((match) => match.phrase);
   const renewalHits = input.signals.renewal.map((match) => match.phrase);
   const receiptHits = input.signals.paymentReceipt.map((match) => match.phrase);
@@ -105,6 +159,17 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     opportunityScore = 92;
     confidence = 93;
     alertTypes.add(AlertType.PRICE_INCREASE);
+  } else if (strongJobSignal) {
+    category = Category.JOB_OR_CAREER;
+    reasons.push(
+      `Matched strong job signals: ${[...jobHits, ...jobSubjectHits].filter((value, index, array) => array.indexOf(value) === index).join(", ")}`
+    );
+    if (isJobPlatformDomain(input.senderDomain)) {
+      reasons.push(`Recognized recruiting or job platform sender: ${input.senderDomain}.`);
+    }
+    urgencyScore = 54;
+    opportunityScore = 58;
+    confidence = 88;
   } else if (freeTrialHits.length) {
     category = Category.FREE_TRIAL;
     reasons.push(`Matched free trial keywords: ${freeTrialHits.join(", ")}`);
@@ -194,12 +259,21 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 42;
     opportunityScore = 45;
     confidence = 80;
-  } else if ((hasUnsubscribeLink || unsubscribeHits.length) && (retailHits.length || input.signals.likelyMarketing)) {
+  } else if (
+    retailHits.length > 0 &&
+    (hasUnsubscribeLink || unsubscribeHits.length || input.signals.labelSignals.includes("CATEGORY_PROMOTIONS"))
+  ) {
     category = Category.RETAIL_PROMO;
     reasons.push(`Matched retail promo signals: ${retailHits.join(", ")}`);
     urgencyScore = 12;
     opportunityScore = 20;
     confidence = 82;
+  } else if (shoppingHits.length) {
+    category = Category.SHOPPING;
+    reasons.push(`Matched shopping signals: ${shoppingHits.join(", ")}`);
+    urgencyScore = 24;
+    opportunityScore = 36;
+    confidence = 78;
   } else if (input.signals.likelySubscription) {
     category = Category.SUBSCRIPTION;
     reasons.push("Recurring or subscription language detected.");
@@ -267,6 +341,8 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       healthcareHits,
       governmentHits,
       educationHits,
+      shoppingHits,
+      jobSubjectHits,
       freeTrialHits,
       renewalHits,
       receiptHits,
@@ -301,6 +377,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
         healthcare: input.signals.healthcare,
         government: input.signals.government,
         education: input.signals.education,
+        shopping: input.signals.shopping,
         shipping: input.signals.shipping,
         security: input.signals.security
       },

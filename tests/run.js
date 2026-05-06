@@ -58,6 +58,33 @@ const tests = [
     }
   },
   {
+    name: "classifies recruiting emails as jobs even when trial footer language appears",
+    run() {
+      const result = evaluateEmail({
+        subject: "Netflix is hiring a Full Stack Engineer 4 - Title Launch Management",
+        plainTextBody:
+          "View this role on LinkedIn. Start your free trial to message recruiters and unlock more job insights.",
+        senderDomain: "linkedinmail.com"
+      });
+
+      assert.equal(result.classification.category, Category.JOB_OR_CAREER);
+      assert.ok(result.classification.confidence >= 85);
+    }
+  },
+  {
+    name: "classifies job listings as jobs instead of shipping when role keywords are strong",
+    run() {
+      const result = evaluateEmail({
+        subject: "JavaScript Developer | $55/hr Remote at Crossing Hurdles",
+        plainTextBody: "Remote role with salary details. New opportunities arrive daily.",
+        senderDomain: "jobs.example.com"
+      });
+
+      assert.equal(result.classification.category, Category.JOB_OR_CAREER);
+      assert.ok(result.classification.opportunityScore >= 50);
+    }
+  },
+  {
     name: "classifies banking-style messages",
     run() {
       const result = evaluateEmail({
@@ -122,7 +149,7 @@ const tests = [
     }
   },
   {
-    name: "does not classify brand promo email as government",
+    name: "classifies brand merchandising email as shopping instead of government",
     run() {
       const result = evaluateEmail({
         subject: "Your Cinco de Mayo lineup",
@@ -138,7 +165,7 @@ const tests = [
         ]
       });
 
-      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+      assert.equal(result.classification.category, Category.SHOPPING);
       assert.equal(result.signals.government.length, 0);
     }
   },

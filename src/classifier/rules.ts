@@ -82,6 +82,20 @@ export const KEYWORDS = {
     "financial aid",
     "registrar"
   ],
+  shopping: [
+    "shop",
+    "shopping",
+    "store",
+    "shop now",
+    "new arrivals",
+    "lineup",
+    "new collection",
+    "gift guide",
+    "cash back",
+    "wallet",
+    "boutique",
+    "collection"
+  ],
   freeTrial: [
     "trial ends",
     "free trial",
@@ -169,11 +183,8 @@ export const KEYWORDS = {
   retail: [
     "sale",
     "limited time",
-    "shop now",
-    "lineup",
     "save today",
     "exclusive offer",
-    "new arrivals",
     "flash sale",
     "ends tonight"
   ],

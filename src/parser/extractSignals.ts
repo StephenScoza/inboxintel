@@ -13,6 +13,7 @@ export interface ExtractedSignals {
   healthcare: SignalMatch[];
   government: SignalMatch[];
   education: SignalMatch[];
+  shopping: SignalMatch[];
   freeTrial: SignalMatch[];
   renewal: SignalMatch[];
   paymentReceipt: SignalMatch[];
@@ -78,6 +79,7 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
   const healthcare = extractKeywordContexts(combinedText, KEYWORDS.healthcare);
   const government = extractKeywordContexts(combinedText, KEYWORDS.government);
   const education = extractKeywordContexts(combinedText, KEYWORDS.education);
+  const shopping = extractKeywordContexts(combinedText, KEYWORDS.shopping);
   const freeTrial = extractKeywordContexts(combinedText, KEYWORDS.freeTrial);
   const renewal = extractKeywordContexts(combinedText, KEYWORDS.renewal);
   const paymentReceipt = extractKeywordContexts(combinedText, KEYWORDS.paymentReceipt);
@@ -106,6 +108,7 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     containsAny(lower, ["thank you for your order", "receipt", "invoice", "tracking number"]).length > 0;
 
   const likelyMarketing =
+    shopping.length > 0 ||
     retail.length > 0 ||
     raffle.length > 0 ||
     opportunity.length > 0 ||
@@ -126,6 +129,7 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     healthcare,
     government,
     education,
+    shopping,
     freeTrial,
     renewal,
     paymentReceipt,

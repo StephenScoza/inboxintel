@@ -1,5 +1,6 @@
 import express from "express";
 import { Category } from "@prisma/client";
+import { CATEGORY_METADATA, categoryCssClass, categoryFamily } from "../classifier/taxonomy";
 import { prisma } from "../db";
 import { buildSenderInsights } from "../intelligence/senderInsights";
 import { buildSubscriptionInsights } from "../intelligence/subscriptionInsights";
@@ -22,46 +23,7 @@ function formatDate(value: Date | string | null | undefined): string {
 }
 
 function categoryClass(category: string | null | undefined): string {
-  switch (category) {
-    case "BANKING":
-      return "category-banking";
-    case "BILL_OR_UTILITY":
-      return "category-bill-or-utility";
-    case "TRAVEL":
-      return "category-travel";
-    case "JOB_OR_CAREER":
-      return "category-job-or-career";
-    case "HEALTHCARE":
-      return "category-healthcare";
-    case "GOVERNMENT":
-      return "category-government";
-    case "EDUCATION":
-      return "category-education";
-    case "FREE_TRIAL":
-      return "category-free-trial";
-    case "FAILED_PAYMENT":
-      return "category-failed-payment";
-    case "RENEWAL_NOTICE":
-      return "category-renewal-notice";
-    case "ORDER_OR_SHIPPING":
-      return "category-order-or-shipping";
-    case "PAYMENT_RECEIPT":
-      return "category-payment-receipt";
-    case "RETAIL_PROMO":
-      return "category-retail-promo";
-    case "PRICE_INCREASE":
-      return "category-price-increase";
-    case "RAFFLE_OR_GIVEAWAY":
-      return "category-raffle-or-giveaway";
-    case "ACCOUNT_SECURITY":
-      return "category-account-security";
-    case "SUBSCRIPTION":
-      return "category-subscription";
-    case "PERSONAL":
-      return "category-personal";
-    default:
-      return "category-unknown";
-  }
+  return categoryCssClass(category);
 }
 
 function renderCategoryPill(category: string | null | undefined): string {
@@ -325,6 +287,7 @@ function renderPage(title: string, body: string): string {
         .category-healthcare { background: linear-gradient(135deg, #10b981, #047857); }
         .category-government { background: linear-gradient(135deg, #475569, #1e293b); }
         .category-education { background: linear-gradient(135deg, #a855f7, #7e22ce); }
+        .category-shopping { background: linear-gradient(135deg, #14b8a6, #0d9488); }
         .category-failed-payment { background: linear-gradient(135deg, #ef4444, #b91c1c); }
         .category-renewal-notice { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
         .category-order-or-shipping { background: linear-gradient(135deg, #38bdf8, #0ea5e9); }
@@ -432,6 +395,7 @@ function renderPage(title: string, body: string): string {
           <a href="/senders">Senders</a>
           <a href="/subscriptions">Subscriptions</a>
           <a href="/money-leaks">Money Leaks</a>
+          <a href="/analytics">Analytics</a>
           <a href="/alerts">Alerts</a>
           <a href="/classifications">Classifications</a>
           <a href="/health">Health</a>
@@ -1078,6 +1042,167 @@ export function createWebServer() {
     );
   });
 
+  app.get("/analytics", async (_req, res) => {
+    const [
+      categoryBreakdown,
+      topSenders,
+      recentAlertBreakdown,
+      urgentCount,
+      opportunityCount
+    ] = await Promise.all([
+      prisma.classification.groupBy({
+        by: ["category"],
+        _count: {
+          category: true
+        },
+        _avg: {
+          urgencyScore: true,
+          opportunityScore: true,
+          confidence: true
+        },
+        orderBy: {
+          _count: {
+            category: "desc"
+          }
+        }
+      }),
+      prisma.sender.findMany({
+        include: {
+          emails: {
+            include: {
+              classification: true
+            },
+            orderBy: {
+              receivedAt: "desc"
+            },
+            take: 25
+          }
+        },
+        orderBy: {
+          emailCount: "desc"
+        },
+        take: 12
+      }),
+      prisma.alert.groupBy({
+        by: ["type", "category"],
+        _count: {
+          type: true
+        },
+        orderBy: {
+          _count: {
+            type: "desc"
+          }
+        },
+        take: 12
+      }),
+      prisma.classification.count({
+        where: {
+          urgencyScore: {
+            gte: 75
+          }
+        }
+      }),
+      prisma.classification.count({
+        where: {
+          opportunityScore: {
+            gte: 75
+          }
+        }
+      })
+    ]);
+
+    const categoryRows = categoryBreakdown
+      .map(
+        (entry) => `<tr>
+          <td>${renderCategoryPill(entry.category)}</td>
+          <td>${entry._count.category}</td>
+          <td>${Math.round(entry._avg.urgencyScore ?? 0)}</td>
+          <td>${Math.round(entry._avg.opportunityScore ?? 0)}</td>
+          <td>${Math.round(entry._avg.confidence ?? 0)}</td>
+        </tr>`
+      )
+      .join("");
+
+    const familySummary = new Map<string, number>();
+    for (const entry of categoryBreakdown) {
+      const family = categoryFamily(entry.category);
+      familySummary.set(family, (familySummary.get(family) ?? 0) + entry._count.category);
+    }
+
+    const familyCards = Array.from(familySummary.entries())
+      .sort((left, right) => right[1] - left[1])
+      .map(
+        ([family, count]) => `<div class="stat">
+          <strong>${escapeHtml(family)}</strong>
+          <p>Emails: ${count}</p>
+        </div>`
+      )
+      .join("");
+
+    const senderRows = topSenders
+      .map((sender) => {
+        const insights = buildSenderInsights(sender.emails);
+        return `<tr>
+          <td><a href="/senders/${sender.id}">${escapeHtml(sender.name ?? sender.email)}</a></td>
+          <td>${escapeHtml(sender.domain)}</td>
+          <td>${sender.emailCount}</td>
+          <td>${renderCategoryPill(insights.dominantCategory)}</td>
+          <td>${insights.averageConfidence}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const alertRows = recentAlertBreakdown
+      .map(
+        (entry) => `<tr>
+          <td>${escapeHtml(entry.type)}</td>
+          <td>${renderCategoryPill(entry.category)}</td>
+          <td>${entry._count.type}</td>
+        </tr>`
+      )
+      .join("");
+
+    res.send(
+      renderPage(
+        "Analytics",
+        `${renderHero("Mailbox analytics", "Inspect how InboxIntel is classifying the inbox, which senders dominate, and where urgency and opportunity are clustering after larger ingest runs.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Tracked Categories</div><div class="summary-value">${categoryBreakdown.length}</div></div>
+          <div class="summary-card"><div class="summary-label">High Urgency Emails</div><div class="summary-value">${urgentCount}</div></div>
+          <div class="summary-card"><div class="summary-label">High Opportunity Emails</div><div class="summary-value">${opportunityCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Alert Signatures</div><div class="summary-value">${recentAlertBreakdown.length}</div></div>
+        </section>
+        <div class="grid">
+          <section>
+            <h3 class="section-title">Category families</h3>
+            <div class="stats">${familyCards || "<p>No taxonomy data yet.</p>"}</div>
+          </section>
+          <section>
+            <h3 class="section-title">Category distribution</h3>
+            <table>
+              <thead><tr><th>Category</th><th>Emails</th><th>Avg Urgency</th><th>Avg Opportunity</th><th>Avg Confidence</th></tr></thead>
+              <tbody>${categoryRows || '<tr><td colspan="5">No classification data yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3 class="section-title">Top senders</h3>
+            <table>
+              <thead><tr><th>Sender</th><th>Domain</th><th>Email Count</th><th>Dominant Category</th><th>Avg Confidence</th></tr></thead>
+              <tbody>${senderRows || '<tr><td colspan="5">No sender data yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3 class="section-title">Alert signatures</h3>
+            <table>
+              <thead><tr><th>Alert Type</th><th>Category</th><th>Count</th></tr></thead>
+              <tbody>${alertRows || '<tr><td colspan="3">No alerts yet.</td></tr>'}</tbody>
+            </table>
+          </section>
+        </div>`
+      )
+    );
+  });
+
   app.get("/alerts", async (req, res) => {
     const windowDays = Math.max(1, Math.min(30, Number(req.query.windowDays) || 7));
     const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
@@ -1204,8 +1329,11 @@ export function createWebServer() {
 
     const cards = classifications
       .map((item) => {
+        const metadata = CATEGORY_METADATA[item.category];
         return `<div class="stat">
           <strong>${renderCategoryPill(item.category)}</strong>
+          <p>${escapeHtml(metadata.description)}</p>
+          <p>Family: ${escapeHtml(metadata.family)}</p>
           <p>Emails: ${item._count.category}</p>
           <p>Avg urgency: ${Math.round(item._avg.urgencyScore ?? 0)}</p>
           <p>Avg opportunity: ${Math.round(item._avg.opportunityScore ?? 0)}</p>
