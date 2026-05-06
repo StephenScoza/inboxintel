@@ -12,6 +12,7 @@ import {
 } from "../intelligence/subscriptionFacts";
 import { cleanSenderName, deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { extractBody } from "../parser/extractBody";
+import { extractHeaders } from "../parser/extractHeaders";
 import { extractLinks } from "../parser/extractLinks";
 import { logger } from "../utils/logger";
 import { sanitizeJsonValue, sanitizeText } from "../utils/safeJson";
@@ -82,16 +83,57 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     where: { gmailMessageId: message.id }
   });
 
-  if (existing) {
-    logger.info("Skipping duplicate Gmail message", {
-      gmailMessageId: message.id,
-      emailId: existing.id
-    });
-    return { skipped: true, reason: "duplicate" };
-  }
-
   const payload = message.payload;
   const headers = payload?.headers ?? [];
+  const technicalMetadata = extractHeaders(message);
+  if (existing) {
+    const shouldRefreshTechnicalMetadata =
+      !existing.headersJson ||
+      !existing.technicalFactsJson ||
+      !existing.messageIdHeader ||
+      !existing.payloadMimeType;
+
+    if (shouldRefreshTechnicalMetadata) {
+      await prisma.email.update({
+        where: { id: existing.id },
+        data: {
+          gmailHistoryId: technicalMetadata.gmailHistoryId,
+          gmailSizeEstimate: technicalMetadata.gmailSizeEstimate,
+          toHeader: technicalMetadata.toHeader,
+          ccHeader: technicalMetadata.ccHeader,
+          bccHeader: technicalMetadata.bccHeader,
+          replyTo: technicalMetadata.replyTo,
+          returnPath: technicalMetadata.returnPath,
+          deliveredTo: technicalMetadata.deliveredTo,
+          messageIdHeader: technicalMetadata.messageIdHeader,
+          inReplyTo: technicalMetadata.inReplyTo,
+          referencesHeader: technicalMetadata.referencesHeader,
+          listId: technicalMetadata.listId,
+          listUnsubscribe: technicalMetadata.listUnsubscribe,
+          listUnsubscribePost: technicalMetadata.listUnsubscribePost,
+          precedence: technicalMetadata.precedence,
+          autoSubmitted: technicalMetadata.autoSubmitted,
+          authenticationResults: technicalMetadata.authenticationResults,
+          payloadMimeType: technicalMetadata.payloadMimeType,
+          payloadPartCount: technicalMetadata.payloadPartCount,
+          headersJson: technicalMetadata.headersJson as unknown as Prisma.InputJsonValue,
+          technicalFactsJson: technicalMetadata.technicalFactsJson as unknown as Prisma.InputJsonValue
+        }
+      });
+
+      logger.info("Refreshed technical metadata for existing Gmail message", {
+        gmailMessageId: message.id,
+        emailId: existing.id
+      });
+    } else {
+      logger.info("Skipping duplicate Gmail message", {
+        gmailMessageId: message.id,
+        emailId: existing.id
+      });
+    }
+
+    return { skipped: true, reason: "duplicate" };
+  }
   const subject = sanitizeText(getHeader(headers, "Subject")) ?? null;
   const rawSender = getHeader(headers, "From");
   const receivedHeader = getHeader(headers, "Date");
@@ -140,15 +182,36 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     gmailMessageId: message.id,
     gmailThreadId: message.threadId ?? null,
     gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
+    gmailHistoryId: technicalMetadata.gmailHistoryId,
+    gmailSizeEstimate: technicalMetadata.gmailSizeEstimate,
     gmailLabels: message.labelIds ?? [],
     senderRaw: sanitizeText(senderMeta.senderRaw) ?? null,
     senderName: senderMeta.senderName,
     senderEmail: senderMeta.senderEmail,
     senderDomain: senderMeta.senderDomain,
+    toHeader: technicalMetadata.toHeader,
+    ccHeader: technicalMetadata.ccHeader,
+    bccHeader: technicalMetadata.bccHeader,
+    replyTo: technicalMetadata.replyTo,
+    returnPath: technicalMetadata.returnPath,
+    deliveredTo: technicalMetadata.deliveredTo,
+    messageIdHeader: technicalMetadata.messageIdHeader,
+    inReplyTo: technicalMetadata.inReplyTo,
+    referencesHeader: technicalMetadata.referencesHeader,
+    listId: technicalMetadata.listId,
+    listUnsubscribe: technicalMetadata.listUnsubscribe,
+    listUnsubscribePost: technicalMetadata.listUnsubscribePost,
+    precedence: technicalMetadata.precedence,
+    autoSubmitted: technicalMetadata.autoSubmitted,
+    authenticationResults: technicalMetadata.authenticationResults,
+    payloadMimeType: technicalMetadata.payloadMimeType,
+    payloadPartCount: technicalMetadata.payloadPartCount,
     subject,
     snippet: sanitizeText(message.snippet ?? null) ?? null,
     receivedAt,
     rawPayload: undefined,
+    headersJson: technicalMetadata.headersJson as unknown as Prisma.InputJsonValue,
+    technicalFactsJson: technicalMetadata.technicalFactsJson as unknown as Prisma.InputJsonValue,
     amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
     datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue,
     gmailAccountId: context.gmailAccountId,
@@ -168,12 +231,33 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     gmailMessageId: message.id,
     gmailThreadId: message.threadId ?? null,
     gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
+    gmailHistoryId: technicalMetadata.gmailHistoryId,
+    gmailSizeEstimate: technicalMetadata.gmailSizeEstimate,
     gmailLabels: message.labelIds ?? [],
     senderName: senderMeta.senderName,
     senderEmail: senderMeta.senderEmail,
     senderDomain: senderMeta.senderDomain,
+    toHeader: technicalMetadata.toHeader,
+    ccHeader: technicalMetadata.ccHeader,
+    bccHeader: technicalMetadata.bccHeader,
+    replyTo: technicalMetadata.replyTo,
+    returnPath: technicalMetadata.returnPath,
+    deliveredTo: technicalMetadata.deliveredTo,
+    messageIdHeader: technicalMetadata.messageIdHeader,
+    inReplyTo: technicalMetadata.inReplyTo,
+    referencesHeader: technicalMetadata.referencesHeader,
+    listId: technicalMetadata.listId,
+    listUnsubscribe: technicalMetadata.listUnsubscribe,
+    listUnsubscribePost: technicalMetadata.listUnsubscribePost,
+    precedence: technicalMetadata.precedence,
+    autoSubmitted: technicalMetadata.autoSubmitted,
+    authenticationResults: technicalMetadata.authenticationResults,
+    payloadMimeType: technicalMetadata.payloadMimeType,
+    payloadPartCount: technicalMetadata.payloadPartCount,
     subject,
     receivedAt,
+    headersJson: technicalMetadata.headersJson as unknown as Prisma.InputJsonValue,
+    technicalFactsJson: technicalMetadata.technicalFactsJson as unknown as Prisma.InputJsonValue,
     gmailAccountId: context.gmailAccountId,
     senderId: sender?.id ?? null
   };
@@ -182,8 +266,12 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     gmailMessageId: message.id,
     gmailThreadId: message.threadId ?? null,
     gmailInternalAt: message.internalDate ? new Date(Number(message.internalDate)) : null,
+    gmailHistoryId: technicalMetadata.gmailHistoryId,
+    gmailSizeEstimate: technicalMetadata.gmailSizeEstimate,
     gmailLabels: message.labelIds ?? [],
     receivedAt,
+    payloadMimeType: technicalMetadata.payloadMimeType,
+    payloadPartCount: technicalMetadata.payloadPartCount,
     gmailAccountId: context.gmailAccountId,
     senderId: sender?.id ?? null
   };

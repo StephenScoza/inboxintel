@@ -65,17 +65,38 @@ model Email {
   gmailMessageId   String          @unique
   gmailThreadId    String?
   gmailInternalAt  DateTime?
+  gmailHistoryId   String?
+  gmailSizeEstimate Int?
   gmailLabels      String[]
   senderRaw        String?
   senderName       String?
   senderEmail      String?
   senderDomain     String?
+  toHeader         String?
+  ccHeader         String?
+  bccHeader        String?
+  replyTo          String?
+  returnPath       String?
+  deliveredTo      String?
+  messageIdHeader  String?
+  inReplyTo        String?
+  referencesHeader String?
+  listId           String?
+  listUnsubscribe  String?
+  listUnsubscribePost String?
+  precedence       String?
+  autoSubmitted    String?
+  authenticationResults String?
+  payloadMimeType  String?
+  payloadPartCount Int?
   subject          String?
   snippet          String?
   receivedAt       DateTime?
   plainTextBody    String?
   htmlBody         String?
   rawPayload       Json?
+  headersJson      Json?
+  technicalFactsJson Json?
   amountsJson      Json?
   datesJson        Json?
   gmailAccountId   String

@@ -9,6 +9,7 @@ const {
 const { buildSubscriptionInsights } = require("../dist/intelligence/subscriptionInsights.js");
 const { buildAlertSuppressionKey } = require("../dist/alerts/policy.js");
 const { buildDiscordPayload } = require("../dist/alerts/discord.js");
+const { extractHeaders } = require("../dist/parser/extractHeaders.js");
 const { sanitizeJsonString } = require("../dist/utils/safeJson.js");
 
 function evaluateEmail(overrides = {}) {
@@ -310,6 +311,41 @@ const tests = [
     name: "sanitizes invalid json-style hex escapes from payload strings",
     run() {
       assert.equal(sanitizeJsonString(String.raw`bad \x escape`), String.raw`bad \\x escape`);
+    }
+  },
+  {
+    name: "extracts technical headers and routing metadata",
+    run() {
+      const metadata = extractHeaders({
+        historyId: "12345",
+        sizeEstimate: 2048,
+        payload: {
+          mimeType: "multipart/alternative",
+          headers: [
+            { name: "To", value: "user@example.com" },
+            { name: "Cc", value: "cc@example.com" },
+            { name: "Reply-To", value: "reply@example.com" },
+            { name: "Return-Path", value: "<bounce@example.com>" },
+            { name: "Delivered-To", value: "user@example.com" },
+            { name: "Message-ID", value: "<abc123@example.com>" },
+            { name: "List-Unsubscribe", value: "<mailto:unsubscribe@example.com>" },
+            { name: "List-Id", value: "Example List" },
+            { name: "Auto-Submitted", value: "auto-generated" },
+            { name: "Authentication-Results", value: "spf=pass dkim=pass" }
+          ],
+          parts: [{ mimeType: "text/plain" }, { mimeType: "text/html" }]
+        }
+      });
+
+      assert.equal(metadata.gmailHistoryId, "12345");
+      assert.equal(metadata.gmailSizeEstimate, 2048);
+      assert.equal(metadata.payloadMimeType, "multipart/alternative");
+      assert.equal(metadata.payloadPartCount, 3);
+      assert.equal(metadata.replyTo, "reply@example.com");
+      assert.equal(metadata.listUnsubscribe, "<mailto:unsubscribe@example.com>");
+      assert.equal(metadata.technicalFactsJson.hasAuthenticationResults, true);
+      assert.equal(metadata.technicalFactsJson.hasListHeaders, true);
+      assert.equal(metadata.technicalFactsJson.isAutoSubmitted, true);
     }
   }
 ];

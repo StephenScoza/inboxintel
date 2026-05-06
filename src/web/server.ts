@@ -683,6 +683,30 @@ export function createWebServer() {
       return;
     }
 
+    const techEmail = email as typeof email & {
+      gmailHistoryId?: string | null;
+      gmailSizeEstimate?: number | null;
+      payloadMimeType?: string | null;
+      payloadPartCount?: number | null;
+      toHeader?: string | null;
+      ccHeader?: string | null;
+      bccHeader?: string | null;
+      replyTo?: string | null;
+      returnPath?: string | null;
+      deliveredTo?: string | null;
+      messageIdHeader?: string | null;
+      inReplyTo?: string | null;
+      referencesHeader?: string | null;
+      listId?: string | null;
+      listUnsubscribe?: string | null;
+      listUnsubscribePost?: string | null;
+      precedence?: string | null;
+      autoSubmitted?: string | null;
+      authenticationResults?: string | null;
+      headersJson?: unknown;
+      technicalFactsJson?: unknown;
+    };
+
     const linkItems = email.links
       .map((link) => `<li><a href="${escapeHtml(link.url)}">${escapeHtml(link.url)}</a></li>`)
       .join("");
@@ -719,6 +743,38 @@ export function createWebServer() {
                 amounts: email.amountsJson,
                 dates: email.datesJson,
                 signals: email.classification?.signalsJson ?? null
+              },
+              null,
+              2
+            )
+          )}</pre>
+        </section>
+        <section>
+          <h3>Technical Metadata</h3>
+          <pre>${escapeHtml(
+            JSON.stringify(
+              {
+                gmailHistoryId: techEmail.gmailHistoryId ?? null,
+                gmailSizeEstimate: techEmail.gmailSizeEstimate ?? null,
+                payloadMimeType: techEmail.payloadMimeType ?? null,
+                payloadPartCount: techEmail.payloadPartCount ?? null,
+                toHeader: techEmail.toHeader ?? null,
+                ccHeader: techEmail.ccHeader ?? null,
+                bccHeader: techEmail.bccHeader ?? null,
+                replyTo: techEmail.replyTo ?? null,
+                returnPath: techEmail.returnPath ?? null,
+                deliveredTo: techEmail.deliveredTo ?? null,
+                messageIdHeader: techEmail.messageIdHeader ?? null,
+                inReplyTo: techEmail.inReplyTo ?? null,
+                referencesHeader: techEmail.referencesHeader ?? null,
+                listId: techEmail.listId ?? null,
+                listUnsubscribe: techEmail.listUnsubscribe ?? null,
+                listUnsubscribePost: techEmail.listUnsubscribePost ?? null,
+                precedence: techEmail.precedence ?? null,
+                autoSubmitted: techEmail.autoSubmitted ?? null,
+                authenticationResults: techEmail.authenticationResults ?? null,
+                headers: techEmail.headersJson ?? null,
+                technicalFacts: techEmail.technicalFactsJson ?? null
               },
               null,
               2
@@ -1048,7 +1104,12 @@ export function createWebServer() {
       topSenders,
       recentAlertBreakdown,
       urgentCount,
-      opportunityCount
+      opportunityCount,
+      trackedEmailCount,
+      listHeaderCount,
+      authResultsCount,
+      autoSubmittedCount,
+      technicalAverages
     ] = await Promise.all([
       prisma.classification.groupBy({
         by: ["category"],
@@ -1107,6 +1168,34 @@ export function createWebServer() {
           opportunityScore: {
             gte: 75
           }
+        }
+      }),
+      prisma.email.count(),
+      prisma.email.count({
+        where: {
+          listUnsubscribe: {
+            not: null
+          }
+        }
+      }),
+      prisma.email.count({
+        where: {
+          authenticationResults: {
+            not: null
+          }
+        }
+      }),
+      prisma.email.count({
+        where: {
+          autoSubmitted: {
+            not: null
+          }
+        }
+      }),
+      prisma.email.aggregate({
+        _avg: {
+          payloadPartCount: true,
+          gmailSizeEstimate: true
         }
       })
     ]);
@@ -1173,6 +1262,17 @@ export function createWebServer() {
           <div class="summary-card"><div class="summary-label">Alert Signatures</div><div class="summary-value">${recentAlertBreakdown.length}</div></div>
         </section>
         <div class="grid">
+          <section>
+            <h3 class="section-title">Technical coverage</h3>
+            <div class="stats">
+              <div class="stat"><strong>Tracked emails</strong><p>${trackedEmailCount}</p></div>
+              <div class="stat"><strong>List-Unsubscribe</strong><p>${listHeaderCount}</p></div>
+              <div class="stat"><strong>Auth results</strong><p>${authResultsCount}</p></div>
+              <div class="stat"><strong>Auto-submitted</strong><p>${autoSubmittedCount}</p></div>
+              <div class="stat"><strong>Avg MIME parts</strong><p>${Math.round(technicalAverages._avg.payloadPartCount ?? 0)}</p></div>
+              <div class="stat"><strong>Avg Gmail size</strong><p>${Math.round(technicalAverages._avg.gmailSizeEstimate ?? 0)} bytes</p></div>
+            </div>
+          </section>
           <section>
             <h3 class="section-title">Category families</h3>
             <div class="stats">${familyCards || "<p>No taxonomy data yet.</p>"}</div>
