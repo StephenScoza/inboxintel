@@ -254,6 +254,49 @@ const tests = [
     }
   },
   {
+    name: "classifies canva feature marketing as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "The moment you’ve been waiting for...",
+        plainTextBody:
+          "Add subtitles to video. Export directly to Outlook. Video building blocks. Canva Sheets update.",
+        senderDomain: "engage.canva.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies audible recommendation blasts as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Explore trending titles",
+        plainTextBody:
+          "Find top picks for you. Popular listens. You may unsubscribe from Audible promotional emails at any time.",
+        senderDomain: "mail.audible.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies b2b compliance-mail promos as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "What is Compliance Mail? Why Do Your Customers Need It?",
+        plainTextBody:
+          "Many businesses rely on compliance mail every day. Learn more now and book a demo call.",
+        senderDomain: "certifiedmaillabels.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
     name: "classifies Google Voice relays as sms or text",
     run() {
       const result = evaluateEmail({

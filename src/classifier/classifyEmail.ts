@@ -133,12 +133,15 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     "proxyscrape.com",
     "firecrawl.dev",
     "firecrawl.com",
+    "canva.com",
     "google.com",
     "paniniamerica.net",
     "opentable.com",
     "coinbase.com",
     "quick.md",
     "akamai.com",
+    "audible.com",
+    "certifiedmaillabels.com",
     "peacocktv.com",
     "umusic-online.com"
   ]
