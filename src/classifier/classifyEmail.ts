@@ -110,7 +110,20 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     return false;
   }
 
-  return ["openai.com", "proxyscrape.com", "firecrawl.dev", "firecrawl.com", "google.com", "paniniamerica.net"]
+  return [
+    "openai.com",
+    "proxyscrape.com",
+    "firecrawl.dev",
+    "firecrawl.com",
+    "google.com",
+    "paniniamerica.net",
+    "opentable.com",
+    "coinbase.com",
+    "quick.md",
+    "akamai.com",
+    "peacocktv.com",
+    "umusic-online.com"
+  ]
     .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -149,6 +162,7 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "bathandbodyworks.com",
     "chipotle.com",
     "coldstonecreamery.com",
+    "snipesusa.com",
     "panerabread.com",
     "vitacoco.com",
     "yeezy.com",
@@ -192,7 +206,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const unsubscribeHits = input.signals.unsubscribe.map((match) => match.phrase);
   const strongSocialSignal = socialHits.length > 0 || isSocialDomain(input.senderDomain);
   const strongNewsletterSignal =
-    newsletterHits.length > 0 || (input.signals.likelyMarketing && isProductNewsletterDomain(input.senderDomain));
+    newsletterHits.length > 0 ||
+    input.signals.labelSignals.includes("CATEGORY_UPDATES") ||
+    (input.signals.likelyMarketing && isProductNewsletterDomain(input.senderDomain));
   const strongSmsSignal =
     smsHits.length > 0 ||
     (isVoiceRelayDomain(input.senderDomain) && Boolean(input.subject?.toLowerCase().includes("text message")));
@@ -375,6 +391,15 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 48;
     opportunityScore = 52;
     confidence = 78;
+  } else if (input.signals.likelyMarketing && isCommerceDomain(input.senderDomain)) {
+    category =
+      hasUnsubscribeLink || unsubscribeHits.length || input.signals.labelSignals.includes("CATEGORY_PROMOTIONS")
+        ? Category.RETAIL_PROMO
+        : Category.SHOPPING;
+    reasons.push(`Matched commerce-domain fallback: ${input.senderDomain}`);
+    urgencyScore = category === Category.RETAIL_PROMO ? 14 : 24;
+    opportunityScore = category === Category.RETAIL_PROMO ? 24 : 38;
+    confidence = 76;
   } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|icloud\.com/i.test(input.senderDomain)) {
     category = Category.PERSONAL;
     reasons.push("Sender uses a common personal mailbox domain.");

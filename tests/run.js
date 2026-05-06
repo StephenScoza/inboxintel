@@ -253,6 +253,18 @@ const tests = [
     }
   },
   {
+    name: "classifies credit score monitoring as banking",
+    run() {
+      const result = evaluateEmail({
+        subject: "Looks like your credit score went down",
+        plainTextBody: "Let's investigate your credit score and account details.",
+        senderDomain: "o.sofi.org"
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+    }
+  },
+  {
     name: "classifies pickup ready notices as order or shipping",
     run() {
       const result = evaluateEmail({
@@ -290,6 +302,57 @@ const tests = [
       });
 
       assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "does not classify generic promo emails as product newsletter from footer policy text alone",
+    run() {
+      const result = evaluateEmail({
+        subject: "Running bestsellers",
+        plainTextBody: "Explore our bestsellers today. View products, offers, and sizing help.",
+        senderDomain: "email.newbalance.com"
+      });
+
+      assert.notEqual(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies restaurant discovery newsletters as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "The Edit: this month's restaurant picks",
+        plainTextBody: "Discover diner-favorite brunch spots and new restaurants in your area.",
+        senderDomain: "mgs.opentable.com"
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies commerce-domain marketing fallback as retail promo",
+    run() {
+      const result = evaluateEmail({
+        subject: "Want to Opt-Out of Mother's Day Emails?",
+        plainTextBody: "Opt out or unsubscribe from Mother's Day emails if you prefer.",
+        senderDomain: "e.snipesusa.com",
+        links: [
+          { url: "https://snipes.example/unsubscribe", domain: "snipes.example", text: "unsubscribe" }
+        ]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "classifies steam account changes as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "Steam Guard Mobile Authenticator added",
+        plainTextBody: "A Steam Guard Mobile Authenticator was added to your Steam account.",
+        senderDomain: "steampowered.com"
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
     }
   },
   {

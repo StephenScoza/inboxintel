@@ -17,7 +17,9 @@ export const KEYWORDS = {
     "statement is ready",
     "transfer your money",
     "instant transfer",
-    "real-time movement"
+    "real-time movement",
+    "credit score",
+    "score went down"
   ],
   bill: [
     "bill is ready",
@@ -106,6 +108,9 @@ export const KEYWORDS = {
     "weekly report",
     "trend report",
     "weekly schedule",
+    "restaurant picks",
+    "new restaurants",
+    "new music",
     "release notes",
     "product update",
     "what's new",
@@ -117,7 +122,8 @@ export const KEYWORDS = {
     "chat history",
     "daily help",
     "gemini",
-    "privacy policy"
+    "update to our privacy policy",
+    "policy update"
   ],
   sms: [
     "new text message",
@@ -131,7 +137,6 @@ export const KEYWORDS = {
   shopping: [
     "shop",
     "shopping",
-    "store",
     "shop now",
     "new arrivals",
     "lineup",
@@ -219,7 +224,11 @@ export const KEYWORDS = {
     "verification code",
     "sign-in attempt",
     "two-factor",
-    "confirm your email address"
+    "confirm your email address",
+    "steam guard",
+    "authenticator added",
+    "phone number was added",
+    "payment scams"
   ],
   subscription: [
     "subscription",
@@ -243,7 +252,8 @@ export const KEYWORDS = {
     "% off",
     "just dropped",
     "buy 3, get 1 free",
-    "buy 2, get 1 free"
+    "buy 2, get 1 free",
+    "opt-out"
   ],
   unsubscribe: ["unsubscribe", "manage preferences", "email preferences"],
   urgent: ["ends today", "expires today", "last chance", "deadline", "final reminder", "ending soon", "act now"]
