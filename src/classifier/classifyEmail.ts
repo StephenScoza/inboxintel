@@ -195,6 +195,20 @@ function detectJobSubjectSignals(subject: string | null): string[] {
   ]);
 }
 
+function detectEducationEventSignals(text: string): string[] {
+  return containsAny(text, [
+    "registration is open",
+    "registration is now open",
+    "register by",
+    "early bird discount",
+    "educational sessions",
+    "peer learning",
+    "virtual registration",
+    "continuing education",
+    "conference registration"
+  ]);
+}
+
 function isCommerceDomain(senderDomain: string | null): boolean {
   if (!senderDomain) {
     return false;
@@ -349,6 +363,8 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const healthcareHits = input.signals.healthcare.map((match) => match.phrase);
   const governmentHits = input.signals.government.map((match) => match.phrase);
   const educationHits = input.signals.education.map((match) => match.phrase);
+  const educationEventHits = detectEducationEventSignals(combinedText);
+  const strongEducationSignal = educationHits.length > 0 || educationEventHits.length >= 2;
   const socialHits = input.signals.social.map((match) => match.phrase);
   const newsletterHits = input.signals.newsletter.map((match) => match.phrase);
   const smsHits = input.signals.sms.map((match) => match.phrase);
@@ -504,9 +520,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 62;
     opportunityScore = 12;
     confidence = 82;
-  } else if (educationHits.length) {
+  } else if (strongEducationSignal) {
     category = Category.EDUCATION;
-    reasons.push(`Matched education keywords: ${educationHits.join(", ")}`);
+    reasons.push(`Matched education signals: ${dedupePhrases([...educationHits, ...educationEventHits]).join(", ")}`);
     urgencyScore = 45;
     opportunityScore = 18;
     confidence = 81;
@@ -654,6 +670,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       healthcareHits,
       governmentHits,
       educationHits,
+      educationEventHits,
       socialHits,
       newsletterHits,
       smsHits,

@@ -145,6 +145,21 @@ const tests = [
     }
   },
   {
+    name: "classifies conference registration mail as education instead of unknown",
+    run() {
+      const result = evaluateEmail({
+        subject: "Have you heard? JADPRO Live registration is open",
+        plainTextBody:
+          "Registration is now open. Join us for educational sessions, peer learning opportunities, and virtual registration. Register by August 28 for the early bird discount.",
+        senderDomain: "hbside.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.EDUCATION);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
     name: "classifies a retail promo when unsubscribe and promo language are present",
     run() {
       const result = evaluateEmail({
@@ -275,6 +290,33 @@ const tests = [
 
       assert.equal(result.classification.category, Category.BANKING);
       assert.ok(result.classification.confidence >= 80);
+    }
+  },
+  {
+    name: "classifies payout request confirmations as payment receipts instead of banking",
+    run() {
+      const result = evaluateEmail({
+        subject: "We’ve got your payment request",
+        plainTextBody:
+          "Thank you for requesting payment to your bank account. ACH $0.25. We'll let you know once it's been sent.",
+        senderDomain: "topcashback.com"
+      });
+
+      assert.equal(result.classification.category, Category.PAYMENT_RECEIPT);
+      assert.notEqual(result.classification.category, Category.BANKING);
+    }
+  },
+  {
+    name: "classifies transaction charge alerts as payment receipts",
+    run() {
+      const result = evaluateEmail({
+        subject: "A new transaction was charged to your account",
+        plainTextBody:
+          "A purchase was charged to your account in the amount of $24.78. View posted transaction details.",
+        senderDomain: "notification.capitalone.com"
+      });
+
+      assert.equal(result.classification.category, Category.PAYMENT_RECEIPT);
     }
   },
   {

@@ -173,7 +173,12 @@ export const KEYWORDS = {
     "receipt",
     "invoice",
     "payment received",
+    "payment request",
+    "payment to your bank account",
+    "requesting payment to your bank account",
     "order total",
+    "purchase was charged",
+    "charged to your account",
     "charged to your card",
     "billing receipt"
   ],
