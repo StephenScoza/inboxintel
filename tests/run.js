@@ -677,6 +677,117 @@ const tests = [
     }
   },
   {
+    name: "does not classify retail trial-size promos as free trials",
+    run() {
+      const result = evaluateEmail({
+        subject: "Freshly bloomed scents for spring",
+        plainTextBody:
+          "Shop new arrivals, get a free trial size, and explore Beauty Insider rewards for spring.",
+        senderDomain: "beauty.sephora.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.FREE_TRIAL);
+      assert.equal(result.classification.category, Category.SHOPPING);
+    }
+  },
+  {
+    name: "does not classify social premium prompts as free trials",
+    run() {
+      const result = evaluateEmail({
+        subject: "Stephen J., thanks for being a valued member",
+        plainTextBody:
+          "See who viewed your profile and start your free trial for Premium to unlock more insights.",
+        senderDomain: "em.linkedin.com",
+        labels: ["CATEGORY_UPDATES"]
+      });
+
+      assert.notEqual(result.classification.category, Category.FREE_TRIAL);
+      assert.equal(result.classification.category, Category.SOCIAL_OR_COMMUNITY);
+    }
+  },
+  {
+    name: "does not classify scam-awareness promos as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "Upgrade your savings with a NEW, even higher 4.50%",
+        plainTextBody:
+          "Learn how to avoid suspicious activity and payment scams while earning more with your savings account.",
+        senderDomain: "m.sofi.org",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.ACCOUNT_SECURITY);
+      assert.equal(result.classification.category, Category.BANKING);
+    }
+  },
+  {
+    name: "does not classify promo rewards mail as payment receipt from receipt wording alone",
+    run() {
+      const result = evaluateEmail({
+        subject: "Stephen, earn a Free Night Reward + 130K Points while you still can",
+        plainTextBody:
+          "This promotional email says no receipt is necessary and your card could unlock more benefits.",
+        senderDomain: "h5.hilton.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.PAYMENT_RECEIPT);
+    }
+  },
+  {
+    name: "does not classify retail promos as education from weak course wording",
+    run() {
+      const result = evaluateEmail({
+        subject:
+          "Save Up to 70% Off: Capture Your Best Look at JCPenney Portraits by Lifetouch – Includes 1 Digital Image + 9 Standard Prints of One Pose",
+        plainTextBody:
+          "Portrait studio offer for families. Shop now and save on a photography package.",
+        senderDomain: "r.groupon.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.EDUCATION);
+    }
+  },
+  {
+    name: "classifies identity history requests from government domains",
+    run() {
+      const result = evaluateEmail({
+        subject: "Identity History Summary Request",
+        plainTextBody: "Your identity history summary request is being processed.",
+        senderDomain: "services.fbi.gov"
+      });
+
+      assert.equal(result.classification.category, Category.GOVERNMENT);
+    }
+  },
+  {
+    name: "classifies ebay member messages as shopping",
+    run() {
+      const result = evaluateEmail({
+        subject:
+          "sturos_40 sent a message about Size 10.5 - Men’s Saucony ProGrid Omni 9 Navy Yellow S70739-24 Brand New In Box #188009708074",
+        plainTextBody: "A buyer sent a message about your item listing and asked about the size.",
+        senderDomain: "members.ebay.com"
+      });
+
+      assert.equal(result.classification.category, Category.SHOPPING);
+    }
+  },
+  {
+    name: "classifies OneDrive memory digests as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "24 April! Over the years",
+        plainTextBody: "Here are some photo memories from OneDrive over the years.",
+        senderDomain: "photos.onedrive.com"
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "classifies cashback affiliate promotions as shopping instead of newsletter",
     run() {
       const result = evaluateEmail({

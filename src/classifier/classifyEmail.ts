@@ -147,6 +147,7 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     "amcplus.com",
     "certifiedmaillabels.com",
     "leafwell.com",
+    "onedrive.com",
     "peacocktv.com",
     "umusic-online.com"
   ]
@@ -177,6 +178,16 @@ function isFinancialDomain(senderDomain: string | null): boolean {
     "venmo.com",
     "zellepay.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function isGovernmentDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return ["fbi.gov", "irs.gov", "ssa.gov", "pa.gov", "nj.gov"].some(
+    (domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`)
+  );
 }
 
 function detectJobSubjectSignals(subject: string | null): string[] {
@@ -249,6 +260,9 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "jjjjound.com",
     "umusic-online.com",
     "taylorswift.com",
+    "ebay.com",
+    "travisscott.com",
+    "corteiz.com",
     "libertycannabis.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
@@ -274,6 +288,165 @@ function isPayrollDomain(senderDomain: string | null): boolean {
   return ["insperityservices.com", "adp.com", "paychex.com"].some(
     (domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`)
   );
+}
+
+function filterFreeTrialMatches(
+  matches: ExtractedSignals["freeTrial"],
+  senderDomain: string | null,
+  likelyMarketing: boolean
+): ExtractedSignals["freeTrial"] {
+  const socialSender = isSocialDomain(senderDomain);
+  const commerceSender = isCommerceDomain(senderDomain);
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+    const hasLifecycleContext = hasAnyKeyword(context, [
+      "trial ends",
+      "trial ending",
+      "trial expires",
+      "trial will end",
+      "trial period",
+      "renews",
+      "billing",
+      "cancel",
+      "paid plan",
+      "continue after"
+    ]);
+    const looksRetailTrial = hasAnyKeyword(context, [
+      "trial size",
+      "sample",
+      "beauty insider",
+      "free gift",
+      "shop now",
+      "new arrivals"
+    ]);
+
+    if (hasLifecycleContext) {
+      return true;
+    }
+
+    if (looksRetailTrial || socialSender) {
+      return false;
+    }
+
+    return !(likelyMarketing && commerceSender);
+  });
+}
+
+function filterReceiptMatches(
+  matches: ExtractedSignals["paymentReceipt"],
+  senderDomain: string | null,
+  likelyMarketing: boolean
+): ExtractedSignals["paymentReceipt"] {
+  const commerceSender = isCommerceDomain(senderDomain);
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "receipt") {
+      return hasAnyKeyword(context, [
+        "purchase",
+        "transaction",
+        "payment",
+        "charged",
+        "invoice",
+        "order total",
+        "order number",
+        "paid",
+        "refund"
+      ]);
+    }
+
+    if (match.phrase === "billing receipt") {
+      return true;
+    }
+
+    return !(likelyMarketing && commerceSender && hasAnyKeyword(context, ["coupon", "reward", "offer", "promo"]));
+  });
+}
+
+function filterSecurityMatches(
+  matches: ExtractedSignals["security"],
+  senderDomain: string | null,
+  likelyMarketing: boolean,
+  subject: string | null
+): ExtractedSignals["security"] {
+  const financialSender = isFinancialDomain(senderDomain);
+  const subjectText = (subject ?? "").toLowerCase();
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "suspicious activity") {
+      return hasAnyKeyword(context, [
+        "suspicious activity on your account",
+        "account alert",
+        "sign-in",
+        "login",
+        "password",
+        "device",
+        "fraud",
+        "security alert",
+        "unrecognized"
+      ]) || hasAnyKeyword(subjectText, ["security alert", "suspicious activity", "account alert", "login attempt"]);
+    }
+
+    if (match.phrase === "payment scams") {
+      return !likelyMarketing && financialSender;
+    }
+
+    return true;
+  });
+}
+
+function filterEducationMatches(matches: ExtractedSignals["education"]): ExtractedSignals["education"] {
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "course") {
+      return hasAnyKeyword(context, [
+        "course schedule",
+        "online course",
+        "course starts",
+        "student",
+        "instructor",
+        "certificate",
+        "curriculum",
+        "class"
+      ]);
+    }
+
+    return true;
+  });
+}
+
+function filterSubscriptionMatches(
+  matches: ExtractedSignals["subscription"],
+  senderDomain: string | null,
+  likelyMarketing: boolean
+): ExtractedSignals["subscription"] {
+  const commerceSender = isCommerceDomain(senderDomain);
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "membership") {
+      return hasAnyKeyword(context, [
+        "membership renew",
+        "membership fee",
+        "membership billed",
+        "membership plan",
+        "membership charge",
+        "manage membership"
+      ]);
+    }
+
+    if (match.phrase === "subscription") {
+      return true;
+    }
+
+    return !(likelyMarketing && commerceSender && hasAnyKeyword(context, ["reward", "badge", "status update"]));
+  });
 }
 
 function dedupePhrases(values: string[]): string[] {
@@ -391,7 +564,29 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     .join("\n")
     .toLowerCase();
   const filteredBankingMatches = filterBankingMatches(input.signals.banking, input.senderDomain);
+  const filteredEducationMatches = filterEducationMatches(input.signals.education);
+  const filteredFreeTrialMatches = filterFreeTrialMatches(
+    input.signals.freeTrial,
+    input.senderDomain,
+    input.signals.likelyMarketing
+  );
+  const filteredReceiptMatches = filterReceiptMatches(
+    input.signals.paymentReceipt,
+    input.senderDomain,
+    input.signals.likelyMarketing
+  );
+  const filteredSecurityMatches = filterSecurityMatches(
+    input.signals.security,
+    input.senderDomain,
+    input.signals.likelyMarketing,
+    input.subject
+  );
   const filteredShippingMatches = filterShippingMatches(input.signals.shipping, input.labels, input.senderDomain);
+  const filteredSubscriptionMatches = filterSubscriptionMatches(
+    input.signals.subscription,
+    input.senderDomain,
+    input.signals.likelyMarketing
+  );
   const bankingHits = filteredBankingMatches.map((match) => match.phrase);
   const billHits = input.signals.bill.map((match) => match.phrase);
   const travelHits = input.signals.travel.map((match) => match.phrase);
@@ -402,23 +597,23 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     (jobHits.length > 0 && (jobSubjectHits.length > 0 || isJobPlatformDomain(input.senderDomain)));
   const healthcareHits = input.signals.healthcare.map((match) => match.phrase);
   const governmentHits = input.signals.government.map((match) => match.phrase);
-  const educationHits = input.signals.education.map((match) => match.phrase);
+  const educationHits = filteredEducationMatches.map((match) => match.phrase);
   const educationEventHits = detectEducationEventSignals(combinedText);
   const strongEducationSignal = educationHits.length > 0 || educationEventHits.length >= 2;
   const socialHits = input.signals.social.map((match) => match.phrase);
   const newsletterHits = input.signals.newsletter.map((match) => match.phrase);
   const smsHits = input.signals.sms.map((match) => match.phrase);
   const shoppingHits = input.signals.shopping.map((match) => match.phrase);
-  const freeTrialHits = input.signals.freeTrial.map((match) => match.phrase);
+  const freeTrialHits = filteredFreeTrialMatches.map((match) => match.phrase);
   const renewalHits = input.signals.renewal.map((match) => match.phrase);
-  const receiptHits = input.signals.paymentReceipt.map((match) => match.phrase);
+  const receiptHits = filteredReceiptMatches.map((match) => match.phrase);
   const priceIncreaseHits = input.signals.priceIncrease.map((match) => match.phrase);
   const failedPaymentHits = input.signals.failedPayment.map((match) => match.phrase);
   const raffleHits = input.signals.raffle.map((match) => match.phrase);
   const opportunityHits = input.signals.opportunity.map((match) => match.phrase);
   const shippingHits = filteredShippingMatches.map((match) => match.phrase);
-  const securityHits = input.signals.security.map((match) => match.phrase);
-  const subscriptionHits = input.signals.subscription.map((match) => match.phrase);
+  const securityHits = filteredSecurityMatches.map((match) => match.phrase);
+  const subscriptionHits = filteredSubscriptionMatches.map((match) => match.phrase);
   const retailHits = input.signals.retail.map((match) => match.phrase);
   const urgentHits = input.signals.urgent.map((match) => match.phrase);
   const unsubscribeHits = input.signals.unsubscribe.map((match) => match.phrase);
@@ -460,8 +655,82 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const likelyPayrollFallback =
     isPayrollDomain(input.senderDomain) &&
     hasAnyKeyword(combinedText, ["epaystub", "paystub", "pay stub", "view paycheck", "pay statement"]);
-
+  const likelyGovernmentFallback =
+    isGovernmentDomain(input.senderDomain) &&
+    hasAnyKeyword(combinedText, ["identity history", "summary request", "fingerprint", "identity request"]);
+  const likelyMarketplaceFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "members.ebay.com" || input.senderDomain.endsWith(".members.ebay.com")) &&
+    hasAnyKeyword(combinedText, ["sent a message", "item", "size", "brand new", "in box"]);
   const closestDate = detectClosestDate(input.dates);
+  const likelyProductDomainFallback =
+    isProductNewsletterDomain(input.senderDomain) &&
+    hasAnyKeyword(combinedText, [
+      "memory",
+      "memories",
+      "watchlist",
+      "feature",
+      "update",
+      "what's new",
+      "recommendation",
+      "discover",
+      "weekly",
+      "digest"
+    ]);
+  const directOneDriveMemoryFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "onedrive.com" || input.senderDomain.endsWith(".onedrive.com")) &&
+    hasAnyKeyword(combinedText, ["over the years", "photo memories", "memory"]);
+  const directGovernmentFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "services.fbi.gov" || input.senderDomain.endsWith(".fbi.gov"));
+  const directMarketplaceFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "members.ebay.com" || input.senderDomain.endsWith(".members.ebay.com"));
+  const strongFreeTrialSignal =
+    freeTrialHits.length > 0 &&
+    (renewalHits.length > 0 ||
+      closestDate?.kind === "TRIAL_END" ||
+      hasAnyKeyword(combinedText, [
+        "trial ends",
+        "trial ending",
+        "trial expires",
+        "trial will end",
+        "free trial ends",
+        "your trial ends"
+      ]));
+  const strongSecuritySignal =
+    securityHits.length > 0 &&
+    (!input.signals.likelyMarketing ||
+      hasAnyKeyword(combinedText, [
+        "account",
+        "sign-in",
+        "login",
+        "password",
+        "device",
+        "verification",
+        "verify",
+        "security alert"
+      ]));
+  const strongReceiptSignal =
+    receiptHits.length > 0 &&
+    (!input.signals.likelyMarketing ||
+      hasAnyKeyword(combinedText, [
+        "order",
+        "purchase",
+        "payment",
+        "transaction",
+        "charged",
+        "invoice",
+        "refund",
+        "receipt is attached"
+      ]));
+  const likelySubscriptionSignal =
+    subscriptionHits.length > 0 ||
+    freeTrialHits.length > 0 ||
+    renewalHits.length > 0 ||
+    hasAnyKeyword(combinedText, ["cancel anytime", "monthly", "annual", "billing period", "monthly plan", "annual plan"]);
+
   const reasons: string[] = [];
   let category: Category = Category.UNKNOWN;
   let urgencyScore = 10;
@@ -469,7 +738,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   let confidence = 45;
   const alertTypes = new Set<AlertType>();
 
-  if (securityHits.length) {
+  if (strongSecuritySignal) {
     category = Category.ACCOUNT_SECURITY;
     reasons.push(`Matched security keywords: ${securityHits.join(", ")}`);
     urgencyScore = 90;
@@ -506,7 +775,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 38;
     opportunityScore = input.signals.likelyMarketing ? 34 : 14;
     confidence = 86;
-  } else if (freeTrialHits.length) {
+  } else if (strongFreeTrialSignal) {
     category = Category.FREE_TRIAL;
     reasons.push(`Matched free trial keywords: ${freeTrialHits.join(", ")}`);
     urgencyScore = 75;
@@ -520,7 +789,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     opportunityScore = 70;
     confidence = 91;
     alertTypes.add(AlertType.RENEWAL_SOON);
-  } else if (receiptHits.length) {
+  } else if (strongReceiptSignal) {
     category = Category.PAYMENT_RECEIPT;
     reasons.push(`Matched payment receipt keywords: ${receiptHits.join(", ")}`);
     urgencyScore = 40;
@@ -572,13 +841,19 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 56;
     opportunityScore = 16;
     confidence = 83;
+  } else if (directGovernmentFallback || likelyGovernmentFallback) {
+    category = Category.GOVERNMENT;
+    reasons.push(`Matched government sender fallback: ${input.senderDomain}`);
+    urgencyScore = 58;
+    opportunityScore = 10;
+    confidence = 84;
   } else if (governmentHits.length) {
     category = Category.GOVERNMENT;
     reasons.push(`Matched government keywords: ${governmentHits.join(", ")}`);
     urgencyScore = 62;
     opportunityScore = 12;
     confidence = 82;
-  } else if (strongEducationSignal) {
+  } else if (strongEducationSignal && !(input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") && isCommerceDomain(input.senderDomain) && educationEventHits.length === 0)) {
     category = Category.EDUCATION;
     reasons.push(`Matched education signals: ${dedupePhrases([...educationHits, ...educationEventHits]).join(", ")}`);
     urgencyScore = 45;
@@ -617,6 +892,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 42;
     opportunityScore = 45;
     confidence = 80;
+  } else if (directMarketplaceFallback || likelyMarketplaceFallback) {
+    category = Category.SHOPPING;
+    reasons.push(`Matched marketplace sender fallback: ${input.senderDomain}`);
+    urgencyScore = 22;
+    opportunityScore = 34;
+    confidence = 80;
   } else if (retailHits.length > 0 && commercePromoContext) {
     category = Category.RETAIL_PROMO;
     reasons.push(`Matched retail promo signals: ${retailHits.join(", ")}`);
@@ -638,7 +919,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 24;
     opportunityScore = 36;
     confidence = 78;
-  } else if (input.signals.likelySubscription) {
+  } else if (likelySubscriptionSignal) {
     category = Category.SUBSCRIPTION;
     reasons.push("Recurring or subscription language detected.");
     urgencyScore = 48;
@@ -667,6 +948,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 20;
     opportunityScore = input.signals.likelyMarketing ? 30 : 18;
     confidence = 80;
+  } else if (directOneDriveMemoryFallback || likelyProductDomainFallback) {
+    category = Category.PRODUCT_OR_NEWSLETTER;
+    reasons.push(`Matched product sender fallback: ${input.senderDomain}`);
+    urgencyScore = 18;
+    opportunityScore = 16;
+    confidence = 78;
   } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|hotmail\.com|live\.com|msn\.com|icloud\.com/i.test(input.senderDomain)) {
     category = Category.PERSONAL;
     reasons.push("Sender uses a common personal mailbox domain.");
@@ -754,9 +1041,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       likelySubscription: input.signals.likelySubscription,
       linkDomains: input.signals.linkDomains,
       signalContexts: {
-        freeTrial: input.signals.freeTrial,
+        freeTrial: filteredFreeTrialMatches,
         renewal: input.signals.renewal,
-        paymentReceipt: input.signals.paymentReceipt,
+        paymentReceipt: filteredReceiptMatches,
         priceIncrease: input.signals.priceIncrease,
         failedPayment: input.signals.failedPayment,
         raffle: input.signals.raffle,
@@ -767,13 +1054,14 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
         job: input.signals.job,
         healthcare: input.signals.healthcare,
         government: input.signals.government,
-        education: input.signals.education,
+        education: filteredEducationMatches,
         social: input.signals.social,
         newsletter: input.signals.newsletter,
         sms: input.signals.sms,
         shopping: input.signals.shopping,
         shipping: filteredShippingMatches,
-        security: input.signals.security
+        security: filteredSecurityMatches,
+        subscription: filteredSubscriptionMatches
       },
       primaryAmount: input.amounts[0] ?? null,
       primaryDate: closestDate?.iso ?? null
