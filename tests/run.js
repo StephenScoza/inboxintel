@@ -932,8 +932,12 @@ const tests = [
 
       assert.equal(Array.isArray(payload.embeds), true);
       assert.equal(payload.embeds.length, 1);
-      assert.equal(payload.embeds[0].title, "RENEWAL SOON");
+      assert.equal(payload.embeds[0].title.includes("Renewal Soon"), true);
+      assert.equal(payload.embeds[0].description.includes("Subscription"), true);
+      assert.equal(payload.embeds[0].fields.some((field) => field.name === "Scores"), true);
+      assert.equal(payload.embeds[0].fields.some((field) => field.name === "Detected"), true);
       assert.equal(payload.embeds[0].fields.some((field) => field.name === "Dashboard"), true);
+      assert.equal(typeof payload.embeds[0].timestamp, "string");
       assert.equal("content" in payload, false);
     }
   },

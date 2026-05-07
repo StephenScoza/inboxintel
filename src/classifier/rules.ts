@@ -41,6 +41,7 @@ export const KEYWORDS = {
     "itinerary",
     "reservation",
     "car rental",
+    "roadside assistance",
     "gate change",
     "rental",
     "evisa",

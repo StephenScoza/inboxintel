@@ -1,5 +1,6 @@
 import { AlertType, Category } from "@prisma/client";
 import { config } from "../config";
+import { categoryFamily } from "../classifier/taxonomy";
 
 interface DiscordAlertInput {
   alertType: AlertType;
@@ -22,6 +23,9 @@ interface DiscordWebhookPayload {
     title: string;
     description: string;
     color: number;
+    author?: {
+      name: string;
+    };
     fields: Array<{
       name: string;
       value: string;
@@ -30,6 +34,7 @@ interface DiscordWebhookPayload {
     footer: {
       text: string;
     };
+    timestamp?: string;
     url?: string;
   }>;
 }
@@ -78,25 +83,95 @@ function formatField(value: string | null | undefined, fallback = "n/a"): string
   return normalized ? normalized : fallback;
 }
 
+function humanizeEnum(value: string): string {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function emojiForAlertType(alertType: AlertType): string {
+  switch (alertType) {
+    case AlertType.FREE_TRIAL_ENDING:
+      return "⏳";
+    case AlertType.RENEWAL_SOON:
+      return "♻️";
+    case AlertType.PRICE_INCREASE:
+      return "📈";
+    case AlertType.FAILED_PAYMENT:
+      return "🚨";
+    case AlertType.HIGH_OPPORTUNITY:
+      return "🎯";
+    case AlertType.RAFFLE_OR_GIVEAWAY:
+      return "🎉";
+    case AlertType.URGENT_DEADLINE:
+      return "⚠️";
+    default:
+      return "📬";
+  }
+}
+
+function scoreBar(score: number): string {
+  const filled = Math.max(0, Math.min(5, Math.round(score / 20)));
+  return `${"█".repeat(filled)}${"░".repeat(5 - filled)} ${score}/100`;
+}
+
+function formatDetectedDetails(amount?: string | null, date?: string | null): string {
+  const details = [];
+  if (amount?.trim()) {
+    details.push(`Amount: ${amount.trim()}`);
+  }
+  if (date?.trim()) {
+    details.push(`Date: ${date.trim()}`);
+  }
+
+  return details.length > 0 ? details.join("\n") : "No amount or date detected";
+}
+
 export function buildDiscordPayload(input: DiscordAlertInput): DiscordWebhookPayload {
   const detailUrl = `${config.webBaseUrl}/emails/${input.emailId}`;
+  const family = categoryFamily(input.category);
+  const alertLabel = humanizeEnum(input.alertType);
+  const categoryLabel = humanizeEnum(input.category);
+  const headline = `${emojiForAlertType(input.alertType)} ${alertLabel}`;
+  const senderLine = formatField(input.sender);
+  const description = [
+    `**${categoryLabel}** in **${family}**`,
+    `From: ${senderLine}`,
+    "",
+    formatField(input.reason)
+  ].join("\n");
 
   return {
     embeds: [
       {
-        title: input.alertType.replace(/_/g, " "),
-        description: formatField(input.reason),
+        title: headline,
+        description,
         color: colorForAlertType(input.alertType),
+        author: {
+          name: "InboxIntel Alert"
+        },
         url: detailUrl,
         fields: [
           {
-            name: "Category",
-            value: formatField(input.category),
-            inline: true
+            name: "Subject",
+            value: formatField(input.subject),
+            inline: false
           },
           {
-            name: "Sender",
-            value: formatField(input.sender),
+            name: "Scores",
+            value: `Urgency: ${scoreBar(input.urgencyScore)}\nOpportunity: ${scoreBar(input.opportunityScore)}\nConfidence: ${scoreBar(input.confidence)}`,
+            inline: false
+          },
+          {
+            name: "Detected",
+            value: formatDetectedDetails(input.detectedAmount, input.detectedDate),
+            inline: false
+          },
+          {
+            name: "Routing",
+            value: `Category: ${categoryLabel}\nFamily: ${family}`,
             inline: true
           },
           {
@@ -105,33 +180,8 @@ export function buildDiscordPayload(input: DiscordAlertInput): DiscordWebhookPay
             inline: true
           },
           {
-            name: "Subject",
-            value: formatField(input.subject),
-            inline: false
-          },
-          {
-            name: "Urgency",
-            value: String(input.urgencyScore),
-            inline: true
-          },
-          {
-            name: "Opportunity",
-            value: String(input.opportunityScore),
-            inline: true
-          },
-          {
-            name: "Confidence",
-            value: String(input.confidence),
-            inline: true
-          },
-          {
-            name: "Detected Amount",
-            value: formatField(input.detectedAmount),
-            inline: true
-          },
-          {
-            name: "Detected Date",
-            value: formatField(input.detectedDate),
+            name: "Sender",
+            value: senderLine,
             inline: true
           },
           {
@@ -142,7 +192,8 @@ export function buildDiscordPayload(input: DiscordAlertInput): DiscordWebhookPay
         ],
         footer: {
           text: "InboxIntel read-only Gmail monitor"
-        }
+        },
+        timestamp: new Date().toISOString()
       }
     ]
   };

@@ -174,6 +174,7 @@ function isFinancialDomain(senderDomain: string | null): boolean {
     "sofi.com",
     "creditkarma.com",
     "creditwise.capitalone.com",
+    "experian.com",
     "paypal.com",
     "venmo.com",
     "zellepay.com"
@@ -276,7 +277,8 @@ function isTravelDomain(senderDomain: string | null): boolean {
     "enterprise.com",
     "customer.em.com",
     "visa.vfsevisa.com",
-    "vfsevisa.com"
+    "vfsevisa.com",
+    "aaa-cluballiance.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -638,6 +640,8 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
         "bonus",
         "apr",
         "credit score",
+        "credit scores",
+        "credit limit",
         "checking",
         "savings",
         "cash back",
@@ -651,7 +655,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       isCommerceDomain(input.senderDomain));
   const likelyTravelFallback =
     isTravelDomain(input.senderDomain) &&
-    (travelHits.length > 0 || hasAnyKeyword(combinedText, ["rental", "visa", "evisa", "check-in"]));
+    (travelHits.length > 0 || hasAnyKeyword(combinedText, ["rental", "visa", "evisa", "check-in", "roadside"]));
   const likelyPayrollFallback =
     isPayrollDomain(input.senderDomain) &&
     hasAnyKeyword(combinedText, ["epaystub", "paystub", "pay stub", "view paycheck", "pay statement"]);
@@ -847,7 +851,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 58;
     opportunityScore = 10;
     confidence = 84;
-  } else if (governmentHits.length) {
+  } else if (governmentHits.length && !socialDomain) {
     category = Category.GOVERNMENT;
     reasons.push(`Matched government keywords: ${governmentHits.join(", ")}`);
     urgencyScore = 62;
