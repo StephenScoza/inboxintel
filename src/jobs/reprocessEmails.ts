@@ -1,4 +1,4 @@
-import { ParseIssueSeverity, ParseIssueStage, ParseIssueType, Prisma } from "@prisma/client";
+import { Category, ParseIssueSeverity, ParseIssueStage, ParseIssueType, Prisma } from "@prisma/client";
 import { shouldSuppressAlert } from "../alerts/policy";
 import { prisma } from "../db";
 import {
@@ -145,18 +145,44 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
   }
 }
 
-export async function runReprocess(limit?: number) {
-  const limitClause = typeof limit === "number" && Number.isFinite(limit) ? `LIMIT ${Math.max(1, Math.floor(limit))}` : "";
-  const emailRefs = await prisma.$queryRawUnsafe<Array<{
-    id: string;
-    gmailMessageId: string;
-    gmailAccountId: string;
-  }>>(
-    `SELECT "id", "gmailMessageId", "gmailAccountId"
-     FROM "Email"
-     ORDER BY "receivedAt" DESC NULLS LAST
-     ${limitClause}`
-  );
+interface ReprocessOptions {
+  limit?: number;
+  accountEmail?: string;
+  category?: Category;
+  senderDomain?: string;
+}
+
+export async function runReprocess(options: ReprocessOptions = {}) {
+  const emailRefs = await prisma.email.findMany({
+    where: {
+      ...(options.accountEmail
+        ? {
+            gmailAccount: {
+              email: options.accountEmail
+            }
+          }
+        : {}),
+      ...(options.senderDomain ? { senderDomain: options.senderDomain } : {}),
+      ...(options.category
+        ? {
+            classification: {
+              category: options.category
+            }
+          }
+        : {})
+    },
+    orderBy: {
+      receivedAt: "desc"
+    },
+    take: typeof options.limit === "number" && Number.isFinite(options.limit)
+      ? Math.max(1, Math.floor(options.limit))
+      : undefined,
+    select: {
+      id: true,
+      gmailMessageId: true,
+      gmailAccountId: true
+    }
+  });
 
   let updated = 0;
   let failed = 0;
@@ -538,8 +564,22 @@ export async function runReprocess(limit?: number) {
 if (require.main === module) {
   const limitFlag = process.argv.find((arg) => arg.startsWith("--limit="));
   const limit = limitFlag ? Number(limitFlag.split("=")[1]) : undefined;
+  const accountFlag = process.argv.find((arg) => arg.startsWith("--account="));
+  const accountEmail = accountFlag ? accountFlag.split("=")[1] : undefined;
+  const categoryFlag = process.argv.find((arg) => arg.startsWith("--category="));
+  const rawCategory = categoryFlag ? categoryFlag.split("=")[1] : undefined;
+  const category = rawCategory && rawCategory in Category
+    ? Category[rawCategory as keyof typeof Category]
+    : undefined;
+  const senderDomainFlag = process.argv.find((arg) => arg.startsWith("--sender-domain="));
+  const senderDomain = senderDomainFlag ? senderDomainFlag.split("=")[1] : undefined;
 
-  runReprocess(limit)
+  runReprocess({
+    limit,
+    accountEmail,
+    category,
+    senderDomain
+  })
     .catch((error) => {
       console.error(error);
       process.exit(1);

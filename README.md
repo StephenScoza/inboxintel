@@ -173,6 +173,13 @@ You can also reprocess a limited slice while tuning:
 docker compose exec app npm run reprocess -- --limit=100
 ```
 
+Or target the exact slice you are tuning:
+
+```bash
+docker compose exec app npm run reprocess -- --account=you@example.com --category=UNKNOWN --limit=100
+docker compose exec app npm run reprocess -- --sender-domain=amazon.com --limit=50
+```
+
 The reprocess job refreshes stored extracted amounts, extracted dates, classifications, subscription facts, and creates any newly eligible alerts that do not already exist for an email.
 
 ## 8. View the dashboard

@@ -151,7 +151,11 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     "peacocktv.com",
     "umusic-online.com",
     "nikeshoebot.com",
-    "tubitv.com"
+    "tubitv.com",
+    "calm.com",
+    "amazon.com",
+    "alexa.com",
+    "ebay.com"
   ]
     .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
@@ -237,6 +241,10 @@ function detectEducationEventSignals(text: string): string[] {
     "virtual registration",
     "continuing education",
     "conference registration",
+    "clinical webinar",
+    "upcoming webinars",
+    "webinar",
+    "join us",
     "giving day",
     "support students"
   ]);
@@ -276,6 +284,7 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "booksy.net",
     "jjjjound.com",
     "umusic-online.com",
+    "umzu.com",
     "taylorswift.com",
     "ebay.com",
     "alias.org",
@@ -856,6 +865,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       hasAnyKeyword(combinedText, [
         "bonus",
         "apr",
+        "banking",
+        "banking needs",
+        "credit",
         "credit score",
         "credit scores",
         "credit limit",
@@ -910,6 +922,10 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       "department",
       "engineering"
     ]);
+  const likelyClinicalEducationFallback =
+    input.senderDomain !== null &&
+    input.senderDomain.endsWith(".broadcastmed.com") &&
+    hasAnyKeyword(combinedText, ["clinical", "webinar", "join us", "continuing education", "educational"]);
   const likelyMarketplaceFallback =
     input.senderDomain !== null &&
     (
@@ -944,6 +960,19 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const directMarketplaceFallback =
     input.senderDomain !== null &&
     (input.senderDomain === "members.ebay.com" || input.senderDomain.endsWith(".members.ebay.com"));
+  const directSellerNewsFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "information.ebay.com" || input.senderDomain.endsWith(".information.ebay.com")) &&
+    hasAnyKeyword(combinedText, ["seller news", "seller update", "ebay seller"]);
+  const directAlexaFallback =
+    input.senderDomain !== null &&
+    (
+      input.senderDomain === "amazon.com" ||
+      input.senderDomain.endsWith(".amazon.com") ||
+      input.senderDomain === "alexa.com" ||
+      input.senderDomain.endsWith(".alexa.com")
+    ) &&
+    hasAnyKeyword(combinedText, ["alexa+", "partner with alexa", "browser", "unlimited access"]);
   const strongFreeTrialSignal =
     freeTrialHits.length > 0 &&
     (renewalHits.length > 0 ||
@@ -1124,14 +1153,16 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     opportunityScore = 12;
     confidence = 82;
   } else if (
-    (strongEducationSignal || likelyEducationFallback) &&
+    (strongEducationSignal || likelyEducationFallback || likelyClinicalEducationFallback) &&
     !(input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") && isCommerceDomain(input.senderDomain) && educationEventHits.length === 0)
   ) {
     category = Category.EDUCATION;
     reasons.push(
       strongEducationSignal
         ? `Matched education signals: ${dedupePhrases([...educationHits, ...educationEventHits]).join(", ")}`
-        : `Matched education sender fallback: ${input.senderDomain}`
+        : likelyClinicalEducationFallback
+          ? `Matched clinical education sender fallback: ${input.senderDomain}`
+          : `Matched education sender fallback: ${input.senderDomain}`
     );
     urgencyScore = 45;
     opportunityScore = 18;
@@ -1169,9 +1200,13 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 42;
     opportunityScore = 45;
     confidence = 80;
-  } else if (directMarketplaceFallback || likelyMarketplaceFallback) {
+  } else if (directMarketplaceFallback || directSellerNewsFallback || likelyMarketplaceFallback) {
     category = Category.SHOPPING;
-    reasons.push(`Matched marketplace sender fallback: ${input.senderDomain}`);
+    reasons.push(
+      directSellerNewsFallback
+        ? `Matched marketplace seller-news fallback: ${input.senderDomain}`
+        : `Matched marketplace sender fallback: ${input.senderDomain}`
+    );
     urgencyScore = 22;
     opportunityScore = 34;
     confidence = 80;
@@ -1217,10 +1252,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 28;
     opportunityScore = 24;
     confidence = 84;
-  } else if (strongNewsletterSignal) {
+  } else if (strongNewsletterSignal || directAlexaFallback) {
     category = Category.PRODUCT_OR_NEWSLETTER;
     reasons.push(
-      `Matched newsletter or product update signals: ${dedupePhrases(newsletterHits).join(", ") || input.senderDomain || "product sender"}`
+      directAlexaFallback
+        ? `Matched product-access sender fallback: ${input.senderDomain}`
+        : `Matched newsletter or product update signals: ${dedupePhrases(newsletterHits).join(", ") || input.senderDomain || "product sender"}`
     );
     urgencyScore = 20;
     opportunityScore = input.signals.likelyMarketing ? 30 : 18;

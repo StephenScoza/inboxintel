@@ -1011,6 +1011,117 @@ const tests = [
     }
   },
   {
+    name: "classifies UMZU supplement promos as retail promo instead of unknown",
+    run() {
+      const result = evaluateEmail({
+        subject: "The ULTIMATE Performance Stack is Here! 💪",
+        plainTextBody: "Build your stack, stock up, and unsubscribe anytime for more performance support.",
+        senderDomain: "email.umzu.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://umzu.example/unsubscribe", domain: "umzu.example", text: "unsubscribe" }]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies eBay seller news as shopping instead of unknown",
+    run() {
+      const result = evaluateEmail({
+        subject: "Stephen, your January Seller News is here",
+        plainTextBody: "Read the latest seller update for your eBay business and discover new tools.",
+        senderDomain: "information.ebay.com"
+      });
+
+      assert.equal(result.classification.category, Category.SHOPPING);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies Calm lifecycle promos as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Start Your Year Off Right",
+        plainTextBody: "Explore Calm, discover new content, and unsubscribe from promotional emails anytime.",
+        senderDomain: "breathe.calm.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://calm.example/unsubscribe", domain: "calm.example", text: "unsubscribe" }]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies EarnIn credit alerts as banking",
+    run() {
+      const result = evaluateEmail({
+        subject: "Avoid surprises on your credit",
+        plainTextBody: "Stay ahead of changes to your credit and banking activity with EarnIn updates.",
+        senderDomain: "community.earnin.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies SoFi banking surveys as banking",
+    run() {
+      const result = evaluateEmail({
+        subject: "Receive a $5 gift card for a survey on your banking needs",
+        plainTextBody: "Complete this SoFi survey on your banking needs and receive a $5 gift card.",
+        senderDomain: "sofi.org",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies clinical webinar promos as education",
+    run() {
+      const result = evaluateEmail({
+        subject: "Clinical Insights on Smarter, More Predictable NiTi Shaping",
+        plainTextBody: "Join us for a clinical webinar and continuing education session on modern instrumentation.",
+        senderDomain: "dental.broadcastmed.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.EDUCATION);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies Alexa product-access mail as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Partner with Alexa+ for a better year ahead",
+        plainTextBody: "You now have unlimited access to Alexa+ on your browser.",
+        senderDomain: "amazon.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
+    name: "classifies generic order ready for pickup mail as shipping",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your Liberty order is ready for pickup!",
+        plainTextBody: "Your order is ready for pickup. Visit the store to complete your purchase.",
+        senderDomain: "libertycannabis.com"
+      });
+
+      assert.equal(result.classification.category, Category.ORDER_OR_SHIPPING);
+    }
+  },
+  {
     name: "classifies cashback affiliate promotions as shopping instead of newsletter",
     run() {
       const result = evaluateEmail({

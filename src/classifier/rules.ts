@@ -143,6 +143,9 @@ export const KEYWORDS = {
     "webinar",
     "platform is here",
     "gemini",
+    "alexa+",
+    "seller news",
+    "clinical insights",
     "update to our privacy policy",
     "policy update"
   ],
@@ -256,7 +259,9 @@ export const KEYWORDS = {
     "arriving",
     "pick-up order is ready",
     "pickup order is ready",
-    "rapid pick-up order is ready"
+    "rapid pick-up order is ready",
+    "order is ready for pickup",
+    "ready for pickup"
   ],
   security: [
     "security alert",
