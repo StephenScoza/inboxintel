@@ -599,7 +599,9 @@ function renderChartCard(title: string, subtitle: string, chartMarkup: string): 
 export function createWebServer() {
   const app = express();
 
-  app.get("/", async (_req, res) => {
+  app.get("/", async (req, res) => {
+    const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
+    const accountFilter = accountId ? { gmailAccountId: accountId } : {};
     const [
       emailCount,
       senderCount,
@@ -613,33 +615,57 @@ export function createWebServer() {
       highSignalEmails,
       gmailAccounts
     ] = await Promise.all([
-      prisma.email.count(),
-      prisma.sender.count(),
-      prisma.subscription.count(),
-      prisma.alert.count(),
+      prisma.email.count({ where: accountFilter }),
+      prisma.sender.count({
+        where: accountId
+          ? {
+              emails: {
+                some: {
+                  gmailAccountId: accountId
+                }
+              }
+            }
+          : undefined
+      }),
+      prisma.subscription.count({ where: accountFilter }),
+      prisma.alert.count({ where: accountFilter }),
       prisma.classification.count({
         where: {
+          email: accountFilter,
           urgencyScore: { gte: 75 }
         }
       }),
       prisma.classification.count({
         where: {
+          email: accountFilter,
           opportunityScore: { gte: 75 }
         }
       }),
       prisma.alert.findMany({
         include: { email: true },
+        where: accountFilter,
         orderBy: { createdAt: "desc" },
         take: 6
       }),
       prisma.subscription.findMany({
+        where: accountFilter,
         orderBy: [{ nextRenewalAt: "asc" }, { updatedAt: "desc" }],
         take: 6
       }),
       prisma.sender.findMany({
+        where: accountId
+          ? {
+              emails: {
+                some: {
+                  gmailAccountId: accountId
+                }
+              }
+            }
+          : undefined,
         include: {
           emails: {
             include: { classification: true },
+            where: accountFilter,
             orderBy: { receivedAt: "desc" },
             take: 20
           }
@@ -650,6 +676,7 @@ export function createWebServer() {
       prisma.email.findMany({
         include: { classification: true },
         where: {
+          ...accountFilter,
           OR: [
             { classification: { urgencyScore: { gte: 75 } } },
             { classification: { opportunityScore: { gte: 75 } } }
@@ -660,16 +687,18 @@ export function createWebServer() {
       }),
       prisma.gmailAccount.findMany({
         orderBy: { updatedAt: "desc" },
-        take: 2
+        take: 10
       })
     ]);
 
-    const latestSyncAt = gmailAccounts[0]?.lastSyncedAt ?? null;
+    const selectedAccount = gmailAccounts.find((account) => account.id === accountId) ?? null;
+    const latestSyncAt = selectedAccount?.lastSyncedAt ?? gmailAccounts[0]?.lastSyncedAt ?? null;
     const syncFreshnessMs = latestSyncAt ? Date.now() - latestSyncAt.getTime() : Number.POSITIVE_INFINITY;
     const syncStatus =
       syncFreshnessMs <= config.gmailPollIntervalMs * 2 ? "HEALTHY" :
       syncFreshnessMs <= config.gmailPollIntervalMs * 6 ? "LAGGING" :
       "IDLE";
+    const scopeLabel = selectedAccount ? selectedAccount.email : "All Gmail accounts";
 
     const alertItems = recentAlerts
       .map(
@@ -720,6 +749,16 @@ export function createWebServer() {
       renderPage(
         "InboxIntel Overview",
         `${renderHero("Inbox overview", "See urgent alerts, upcoming renewals, top recurring senders, and the most important signals across your mailbox in one place.")}
+        <form method="get">
+          <select name="accountId">
+            <option value="">All Gmail accounts</option>
+            ${gmailAccounts
+              .map((account) => `<option value="${account.id}" ${account.id === accountId ? "selected" : ""}>${escapeHtml(account.email)}</option>`)
+              .join("")}
+          </select>
+          <button type="submit">Update Scope</button>
+        </form>
+        <p class="muted">Scope: ${escapeHtml(scopeLabel)}</p>
         <section class="summary-grid">
           <div class="summary-card"><div class="summary-label">Emails</div><div class="summary-value">${emailCount}</div></div>
           <div class="summary-card"><div class="summary-label">Senders</div><div class="summary-value">${senderCount}</div></div>
@@ -2358,8 +2397,20 @@ export function createWebServer() {
     );
   });
 
-  app.get("/sync-runs", async (_req, res) => {
+  app.get("/sync-runs", async (req, res) => {
+    const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
+    const gmailAccounts = await prisma.gmailAccount.findMany({
+      orderBy: {
+        email: "asc"
+      },
+      select: {
+        id: true,
+        email: true
+      }
+    });
+    const selectedAccount = gmailAccounts.find((account) => account.id === accountId) ?? null;
     const syncRuns = await prisma.syncRun.findMany({
+      where: accountId ? { gmailAccountId: accountId } : undefined,
       include: {
         gmailAccount: true
       },
@@ -2385,7 +2436,7 @@ export function createWebServer() {
         }, new Map<string, number>())
       )
         .map(([label, value]) => ({ label, value }))
-        .sort((left, right) => right.value - left.value),
+      .sort((left, right) => right.value - left.value),
       {
         valueFormatter: (value) => `${value} runs`
       }
@@ -2431,6 +2482,16 @@ export function createWebServer() {
       renderPage(
         "Sync Runs",
         `${renderHero("Sync run history", "Track every incremental sync, full sync, backfill, and recovery run. This gives us a durable record of inbox coverage, duplicate rate, and operational health as we process more of your mailbox.")}
+        <form method="get">
+          <select name="accountId">
+            <option value="">All Gmail accounts</option>
+            ${gmailAccounts
+              .map((account) => `<option value="${account.id}" ${account.id === accountId ? "selected" : ""}>${escapeHtml(account.email)}</option>`)
+              .join("")}
+          </select>
+          <button type="submit">Update Scope</button>
+        </form>
+        <p class="muted">Scope: ${escapeHtml(selectedAccount?.email ?? "All Gmail accounts")}</p>
         <section class="summary-grid">
           <div class="summary-card"><div class="summary-label">Tracked Runs</div><div class="summary-value">${totalRuns}</div></div>
           <div class="summary-card"><div class="summary-label">Succeeded</div><div class="summary-value">${completedRuns.length}</div></div>
