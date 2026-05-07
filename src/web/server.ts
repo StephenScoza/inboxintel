@@ -1440,7 +1440,9 @@ export function createWebServer() {
     );
   });
 
-  app.get("/analytics", async (_req, res) => {
+  app.get("/analytics", async (req, res) => {
+    const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
+    const accountFilter = accountId ? { gmailAccountId: accountId } : {};
     const timelineDays = 14;
     const timelineCutoff = new Date(Date.now() - timelineDays * 24 * 60 * 60 * 1000);
 
@@ -1461,6 +1463,9 @@ export function createWebServer() {
       gmailAccounts
     ] = await Promise.all([
       prisma.classification.groupBy({
+        where: {
+          email: accountFilter
+        },
         by: ["category"],
         _count: {
           category: true
@@ -1477,11 +1482,21 @@ export function createWebServer() {
         }
       }),
       prisma.sender.findMany({
+        where: accountId
+          ? {
+              emails: {
+                some: {
+                  gmailAccountId: accountId
+                }
+              }
+            }
+          : undefined,
         include: {
           emails: {
             include: {
               classification: true
             },
+            where: accountFilter,
             orderBy: {
               receivedAt: "desc"
             },
@@ -1494,6 +1509,7 @@ export function createWebServer() {
         take: 12
       }),
       prisma.alert.groupBy({
+        where: accountFilter,
         by: ["type", "category"],
         _count: {
           type: true
@@ -1507,6 +1523,7 @@ export function createWebServer() {
       }),
       prisma.classification.count({
         where: {
+          email: accountFilter,
           urgencyScore: {
             gte: 75
           }
@@ -1514,14 +1531,18 @@ export function createWebServer() {
       }),
       prisma.classification.count({
         where: {
+          email: accountFilter,
           opportunityScore: {
             gte: 75
           }
         }
       }),
-      prisma.email.count(),
+      prisma.email.count({
+        where: accountFilter
+      }),
       prisma.email.count({
         where: {
+          ...accountFilter,
           listUnsubscribe: {
             not: null
           }
@@ -1529,6 +1550,7 @@ export function createWebServer() {
       }),
       prisma.email.count({
         where: {
+          ...accountFilter,
           authenticationResults: {
             not: null
           }
@@ -1536,12 +1558,14 @@ export function createWebServer() {
       }),
       prisma.email.count({
         where: {
+          ...accountFilter,
           autoSubmitted: {
             not: null
           }
         }
       }),
       prisma.email.aggregate({
+        where: accountFilter,
         _avg: {
           payloadPartCount: true,
           gmailSizeEstimate: true
@@ -1549,6 +1573,7 @@ export function createWebServer() {
       }),
       prisma.email.findMany({
         where: {
+          ...accountFilter,
           receivedAt: {
             gte: timelineCutoff
           }
@@ -1565,6 +1590,7 @@ export function createWebServer() {
       }),
       prisma.alert.findMany({
         where: {
+          ...accountFilter,
           createdAt: {
             gte: timelineCutoff
           }
@@ -1575,6 +1601,7 @@ export function createWebServer() {
       }),
       prisma.email.findMany({
         where: {
+          ...accountFilter,
           OR: [
             { listId: { not: null } },
             { listUnsubscribe: { not: null } }
@@ -1605,9 +1632,11 @@ export function createWebServer() {
         orderBy: {
           updatedAt: "desc"
         },
-        take: 2
+        take: 10
       })
     ]);
+
+    const selectedAccount = gmailAccounts.find((account) => account.id === accountId) ?? null;
 
     const categoryRows = categoryBreakdown
       .map(
@@ -1738,17 +1767,28 @@ export function createWebServer() {
       }
     );
 
-    const latestSyncAt = gmailAccounts[0]?.lastSyncedAt ?? null;
+    const latestSyncAt = selectedAccount?.lastSyncedAt ?? gmailAccounts[0]?.lastSyncedAt ?? null;
     const syncFreshnessMs = latestSyncAt ? Date.now() - latestSyncAt.getTime() : Number.POSITIVE_INFINITY;
     const syncStatus =
       syncFreshnessMs <= config.gmailPollIntervalMs * 2 ? "HEALTHY" :
       syncFreshnessMs <= config.gmailPollIntervalMs * 6 ? "LAGGING" :
       "IDLE";
+    const scopeLabel = selectedAccount ? selectedAccount.email : "All Gmail accounts";
 
     res.send(
       renderPage(
         "Analytics",
         `${renderHero("Mailbox analytics", "Inspect how InboxIntel is classifying the inbox, where mailing-list volume is clustering, and whether the continuous sync worker is keeping the local dataset fresh.")}
+        <form method="get">
+          <select name="accountId">
+            <option value="">All Gmail accounts</option>
+            ${gmailAccounts
+              .map((account) => `<option value="${account.id}" ${account.id === accountId ? "selected" : ""}>${escapeHtml(account.email)}</option>`)
+              .join("")}
+          </select>
+          <button type="submit">Update Scope</button>
+        </form>
+        <p class="muted">Scope: ${escapeHtml(scopeLabel)}</p>
         <section class="summary-grid">
           <div class="summary-card"><div class="summary-label">Tracked Categories</div><div class="summary-value">${categoryBreakdown.length}</div></div>
           <div class="summary-card"><div class="summary-label">High Urgency Emails</div><div class="summary-value">${urgentCount}</div></div>
@@ -2301,8 +2341,20 @@ export function createWebServer() {
     );
   });
 
-  app.get("/parse-issues", async (_req, res) => {
+  app.get("/parse-issues", async (req, res) => {
+    const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
+    const gmailAccounts = await prisma.gmailAccount.findMany({
+      orderBy: {
+        email: "asc"
+      },
+      select: {
+        id: true,
+        email: true
+      }
+    });
+    const selectedAccount = gmailAccounts.find((account) => account.id === accountId) ?? null;
     const parseIssues = await prisma.parseIssue.findMany({
+      where: accountId ? { gmailAccountId: accountId } : undefined,
       include: {
         email: true,
         gmailAccount: true
@@ -2376,6 +2428,16 @@ export function createWebServer() {
       renderPage(
         "Parse Issues",
         `${renderHero("Parse issue ledger", "Track every email we could not store or parse perfectly. This turns parser drift and malformed payloads into a visible backlog we can steadily drive toward zero.")}
+        <form method="get">
+          <select name="accountId">
+            <option value="">All Gmail accounts</option>
+            ${gmailAccounts
+              .map((account) => `<option value="${account.id}" ${account.id === accountId ? "selected" : ""}>${escapeHtml(account.email)}</option>`)
+              .join("")}
+          </select>
+          <button type="submit">Update Scope</button>
+        </form>
+        <p class="muted">Scope: ${escapeHtml(selectedAccount?.email ?? "All Gmail accounts")}</p>
         <section class="summary-grid">
           <div class="summary-card"><div class="summary-label">Tracked Issues</div><div class="summary-value">${parseIssues.length}</div></div>
           <div class="summary-card"><div class="summary-label">Open Issues</div><div class="summary-value">${openIssues.length}</div></div>
