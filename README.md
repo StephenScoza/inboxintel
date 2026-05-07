@@ -128,10 +128,10 @@ docker compose exec app npm run ingest
 Run a chunked historical backfill:
 
 ```bash
-docker compose exec app npm run backfill -- --start-offset=100 --batch-pages=20 --batches=5
+docker compose exec app npm run backfill -- --start-offset=auto --offset-padding-pages=20 --batch-pages=20 --batches=5
 ```
 
-This processes older Gmail pages in deterministic chunks without modifying Gmail. The first batch can bootstrap from a page offset, and later batches chain Gmail `nextPageToken` values automatically so we do not keep rescanning the newest pages. Each backfill batch is recorded in the local sync-run ledger so you can track coverage growth, duplicates, and operational health over time.
+This processes older Gmail pages in deterministic chunks without modifying Gmail. If you use `--start-offset=auto`, InboxIntel estimates current page coverage from the emails already stored in Postgres and adds a safety buffer so the first batch starts beyond the known horizon. Later batches chain Gmail `nextPageToken` values automatically so we do not keep rescanning the newest pages. Each backfill batch is recorded in the local sync-run ledger so you can track coverage growth, duplicates, and operational health over time.
 
 The worker service is already configured in Docker Compose and will start when you run `docker compose up --build`.
 

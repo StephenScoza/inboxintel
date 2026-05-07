@@ -2,6 +2,7 @@ import { SyncRunMode } from "@prisma/client";
 import { prisma } from "../db";
 import { runIngestOnce } from "./ingestGmail";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
 interface BackfillOptions {
   startOffset: number;
@@ -9,6 +10,7 @@ interface BackfillOptions {
   batches?: number;
   pauseMs: number;
   startToken?: string;
+  offsetPaddingPages: number;
 }
 
 function parseNumberFlag(name: string, fallback: number): number {
@@ -21,12 +23,59 @@ function parseNumberFlag(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseOptionalOffsetFlag(name: string): number | "auto" {
+  const flag = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  if (!flag) {
+    return "auto";
+  }
+
+  const rawValue = flag.split("=")[1];
+  if (rawValue === "auto") {
+    return "auto";
+  }
+
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : "auto";
+}
+
+async function resolveStartOffset(
+  requestedStartOffset: number,
+  offsetPaddingPages: number,
+  startToken?: string
+): Promise<number> {
+  if (startToken) {
+    return Math.max(0, Math.floor(requestedStartOffset));
+  }
+
+  const storedEmailCount = await prisma.email.count();
+  const estimatedCoveredPages = Math.ceil(storedEmailCount / config.gmailPageSize);
+  const resolvedOffset = Math.max(
+    0,
+    Math.max(requestedStartOffset, estimatedCoveredPages + Math.max(0, Math.floor(offsetPaddingPages)))
+  );
+
+  logger.info("Resolved Gmail backfill start offset", {
+    requestedStartOffset,
+    offsetPaddingPages,
+    storedEmailCount,
+    gmailPageSize: config.gmailPageSize,
+    estimatedCoveredPages,
+    resolvedOffset
+  });
+
+  return resolvedOffset;
+}
+
 export async function runBackfill(options: BackfillOptions) {
   const maxBatches = typeof options.batches === "number" && Number.isFinite(options.batches)
     ? Math.max(1, Math.floor(options.batches))
     : undefined;
 
-  let currentOffset = Math.max(0, Math.floor(options.startOffset));
+  let currentOffset = await resolveStartOffset(
+    options.startOffset,
+    options.offsetPaddingPages,
+    options.startToken
+  );
   let continuationToken = options.startToken;
   let completedBatches = 0;
   let totalProcessed = 0;
@@ -50,6 +99,7 @@ export async function runBackfill(options: BackfillOptions) {
       {
         batchNumber,
         backfill: true,
+        offsetPaddingPages: options.offsetPaddingPages,
         chainedByPageToken: Boolean(continuationToken)
       },
       continuationToken
@@ -87,12 +137,14 @@ export async function runBackfill(options: BackfillOptions) {
 }
 
 if (require.main === module) {
-  const startOffset = parseNumberFlag("start-offset", 0);
+  const rawStartOffset = parseOptionalOffsetFlag("start-offset");
+  const startOffset = rawStartOffset === "auto" ? 0 : rawStartOffset;
   const batchPages = Math.max(1, parseNumberFlag("batch-pages", 20));
   const batches = process.argv.some((arg) => arg.startsWith("--batches="))
     ? Math.max(1, parseNumberFlag("batches", 1))
     : undefined;
   const pauseMs = Math.max(0, parseNumberFlag("pause-ms", 0));
+  const offsetPaddingPages = Math.max(0, parseNumberFlag("offset-padding-pages", 20));
   const startTokenFlag = process.argv.find((arg) => arg.startsWith("--start-token="));
   const startToken = startTokenFlag ? startTokenFlag.split("=")[1] : undefined;
 
@@ -101,7 +153,8 @@ if (require.main === module) {
     batchPages,
     batches,
     pauseMs,
-    startToken
+    startToken,
+    offsetPaddingPages
   })
     .catch((error) => {
       console.error(error);
