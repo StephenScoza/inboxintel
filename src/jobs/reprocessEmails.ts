@@ -152,6 +152,7 @@ export async function runReprocess(limit?: number) {
   });
 
   let updated = 0;
+  let failed = 0;
 
   for (const email of emails) {
     const intelligence = buildEmailIntelligence({
@@ -169,154 +170,163 @@ export async function runReprocess(limit?: number) {
     });
 
     try {
-      await prisma.classification.upsert({
-        where: {
-          emailId: email.id
-        },
-        update: {
-          category: intelligence.classification.category,
-          confidence: intelligence.classification.confidence,
-          urgencyScore: intelligence.classification.urgencyScore,
-          opportunityScore: intelligence.classification.opportunityScore,
-          reasons: intelligence.classification.reasons,
-          signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
-        },
-        create: {
-          emailId: email.id,
-          category: intelligence.classification.category,
-          confidence: intelligence.classification.confidence,
-          urgencyScore: intelligence.classification.urgencyScore,
-          opportunityScore: intelligence.classification.opportunityScore,
-          reasons: intelligence.classification.reasons,
-          signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
-        }
-      });
-    } catch (error) {
-      if (!isPrismaInvalidArgError(error)) {
-        throw error;
-      }
-
-      logger.warn("Falling back to minimal classification storage during reprocess", {
-        emailId: email.id,
-        gmailMessageId: email.gmailMessageId
-      });
-      await prisma.classification.upsert({
-        where: {
-          emailId: email.id
-        },
-        update: {
-          category: intelligence.classification.category,
-          confidence: intelligence.classification.confidence,
-          urgencyScore: intelligence.classification.urgencyScore,
-          opportunityScore: intelligence.classification.opportunityScore,
-          reasons: intelligence.classification.reasons,
-          signalsJson: Prisma.JsonNull
-        },
-        create: {
-          emailId: email.id,
-          category: intelligence.classification.category,
-          confidence: intelligence.classification.confidence,
-          urgencyScore: intelligence.classification.urgencyScore,
-          opportunityScore: intelligence.classification.opportunityScore,
-          reasons: intelligence.classification.reasons,
-          signalsJson: Prisma.JsonNull
-        }
-      });
-    }
-
-    try {
-      await prisma.email.update({
-        where: { id: email.id },
-        data: {
-          amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
-          datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
-        }
-      });
-    } catch (error) {
-      if (!isPrismaInvalidArgError(error)) {
-        throw error;
-      }
-
-      logger.warn("Falling back to minimal extracted payload storage during reprocess", {
-        emailId: email.id,
-        gmailMessageId: email.gmailMessageId
-      });
-      await prisma.email.update({
-        where: { id: email.id },
-        data: {
-          amountsJson: Prisma.JsonNull,
-          datesJson: Prisma.JsonNull
-        }
-      });
-    }
-
-    if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
-      const vendor = deriveVendorIdentity(email.senderName, email.senderEmail, email.senderDomain);
-      const primaryAmount = chooseSubscriptionAmount(intelligence.amounts);
-      const primaryDate = chooseImportantDate(intelligence.dates, intelligence.classification.category);
-      const primaryDateIso = primaryDate?.iso ?? null;
-      const status = determineSubscriptionStatus(intelligence.classification.category, primaryDateIso);
-      const notes = [
-        ...intelligence.classification.reasons,
-        primaryAmount ? `amount-kind=${primaryAmount.kind}` : null,
-        primaryDate ? `date-kind=${primaryDate.kind}` : null,
-        "reprocessed=true"
-      ]
-        .filter((value): value is string => Boolean(value))
-        .join(" | ");
-
-      await prisma.subscription.upsert({
-        where: {
-          gmailAccountId_normalizedVendor: {
-            gmailAccountId: email.gmailAccountId,
-            normalizedVendor: vendor.normalizedVendor
+      try {
+        await prisma.classification.upsert({
+          where: {
+            emailId: email.id
+          },
+          update: {
+            category: intelligence.classification.category,
+            confidence: intelligence.classification.confidence,
+            urgencyScore: intelligence.classification.urgencyScore,
+            opportunityScore: intelligence.classification.opportunityScore,
+            reasons: intelligence.classification.reasons,
+            signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+          },
+          create: {
+            emailId: email.id,
+            category: intelligence.classification.category,
+            confidence: intelligence.classification.confidence,
+            urgencyScore: intelligence.classification.urgencyScore,
+            opportunityScore: intelligence.classification.opportunityScore,
+            reasons: intelligence.classification.reasons,
+            signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
           }
-        },
-        update: {
-          vendor: vendor.vendor,
-          senderId: email.senderId,
-          amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
-          currency: primaryAmount?.currency ?? undefined,
-          nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : undefined,
-          status,
-          confidence: intelligence.classification.confidence,
-          sourceCategory: intelligence.classification.category,
-          lastSeenAt: email.receivedAt ?? new Date(),
-          notes
-        },
-        create: {
-          gmailAccountId: email.gmailAccountId,
-          senderId: email.senderId,
-          vendor: vendor.vendor,
-          normalizedVendor: vendor.normalizedVendor,
-          amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
-          currency: primaryAmount?.currency ?? "USD",
-          nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : null,
-          status,
-          confidence: intelligence.classification.confidence,
-          sourceCategory: intelligence.classification.category,
-          lastSeenAt: email.receivedAt ?? new Date(),
-          notes
+        });
+      } catch (error) {
+        if (!isPrismaInvalidArgError(error)) {
+          throw error;
         }
-      });
 
-      const primaryAmountLabel = primaryAmount ? `${primaryAmount.currency} ${primaryAmount.value.toFixed(2)}` : null;
-      await maybeCreateAlertsForReprocessedEmail({
+        logger.warn("Falling back to minimal classification storage during reprocess", {
+          emailId: email.id,
+          gmailMessageId: email.gmailMessageId
+        });
+        await prisma.classification.upsert({
+          where: {
+            emailId: email.id
+          },
+          update: {
+            category: intelligence.classification.category,
+            confidence: intelligence.classification.confidence,
+            urgencyScore: intelligence.classification.urgencyScore,
+            opportunityScore: intelligence.classification.opportunityScore,
+            reasons: intelligence.classification.reasons,
+            signalsJson: Prisma.JsonNull
+          },
+          create: {
+            emailId: email.id,
+            category: intelligence.classification.category,
+            confidence: intelligence.classification.confidence,
+            urgencyScore: intelligence.classification.urgencyScore,
+            opportunityScore: intelligence.classification.opportunityScore,
+            reasons: intelligence.classification.reasons,
+            signalsJson: Prisma.JsonNull
+          }
+        });
+      }
+
+      try {
+        await prisma.email.update({
+          where: { id: email.id },
+          data: {
+            amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
+            datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
+          }
+        });
+      } catch (error) {
+        if (!isPrismaInvalidArgError(error)) {
+          throw error;
+        }
+
+        logger.warn("Falling back to minimal extracted payload storage during reprocess", {
+          emailId: email.id,
+          gmailMessageId: email.gmailMessageId
+        });
+        await prisma.email.update({
+          where: { id: email.id },
+          data: {
+            amountsJson: Prisma.JsonNull,
+            datesJson: Prisma.JsonNull
+          }
+        });
+      }
+
+      if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
+        const vendor = deriveVendorIdentity(email.senderName, email.senderEmail, email.senderDomain);
+        const primaryAmount = chooseSubscriptionAmount(intelligence.amounts);
+        const primaryDate = chooseImportantDate(intelligence.dates, intelligence.classification.category);
+        const primaryDateIso = primaryDate?.iso ?? null;
+        const status = determineSubscriptionStatus(intelligence.classification.category, primaryDateIso);
+        const notes = [
+          ...intelligence.classification.reasons,
+          primaryAmount ? `amount-kind=${primaryAmount.kind}` : null,
+          primaryDate ? `date-kind=${primaryDate.kind}` : null,
+          "reprocessed=true"
+        ]
+          .filter((value): value is string => Boolean(value))
+          .join(" | ");
+
+        await prisma.subscription.upsert({
+          where: {
+            gmailAccountId_normalizedVendor: {
+              gmailAccountId: email.gmailAccountId,
+              normalizedVendor: vendor.normalizedVendor
+            }
+          },
+          update: {
+            vendor: vendor.vendor,
+            senderId: email.senderId,
+            amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
+            currency: primaryAmount?.currency ?? undefined,
+            nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : undefined,
+            status,
+            confidence: intelligence.classification.confidence,
+            sourceCategory: intelligence.classification.category,
+            lastSeenAt: email.receivedAt ?? new Date(),
+            notes
+          },
+          create: {
+            gmailAccountId: email.gmailAccountId,
+            senderId: email.senderId,
+            vendor: vendor.vendor,
+            normalizedVendor: vendor.normalizedVendor,
+            amount: primaryAmount ? new Prisma.Decimal(primaryAmount.value) : undefined,
+            currency: primaryAmount?.currency ?? "USD",
+            nextRenewalAt: primaryDateIso ? new Date(primaryDateIso) : null,
+            status,
+            confidence: intelligence.classification.confidence,
+            sourceCategory: intelligence.classification.category,
+            lastSeenAt: email.receivedAt ?? new Date(),
+            notes
+          }
+        });
+
+        const primaryAmountLabel = primaryAmount ? `${primaryAmount.currency} ${primaryAmount.value.toFixed(2)}` : null;
+        await maybeCreateAlertsForReprocessedEmail({
+          emailId: email.id,
+          gmailAccountId: email.gmailAccountId,
+          gmailAccountEmail: email.gmailAccount.email,
+          subject: email.subject,
+          sender: email.senderEmail ?? email.senderRaw,
+          classification: intelligence.classification,
+          primaryAmountLabel,
+          primaryDateIso
+        });
+      }
+
+      updated += 1;
+    } catch (error) {
+      failed += 1;
+      logger.error("Failed to reprocess stored email", {
         emailId: email.id,
-        gmailAccountId: email.gmailAccountId,
-        gmailAccountEmail: email.gmailAccount.email,
-        subject: email.subject,
-        sender: email.senderEmail ?? email.senderRaw,
-        classification: intelligence.classification,
-        primaryAmountLabel,
-        primaryDateIso
+        gmailMessageId: email.gmailMessageId,
+        error: error instanceof Error ? error.message : "Unknown error"
       });
     }
-
-    updated += 1;
   }
 
-  console.log(`Reprocessed ${updated} stored email(s).`);
+  console.log(`Reprocessed ${updated} stored email(s). Failed ${failed}.`);
 }
 
 if (require.main === module) {

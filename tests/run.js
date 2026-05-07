@@ -160,6 +160,20 @@ const tests = [
     }
   },
   {
+    name: "does not classify css position boilerplate as job mail",
+    run() {
+      const result = evaluateEmail({
+        subject: "Clinical Insights on Smarter, More Predictable NiTi Shaping",
+        plainTextBody:
+          "Join us for a clinical webinar. CSS snippet: position: relative; top: 0.4em; and unsubscribe preferences for customers.",
+        senderDomain: "dental.broadcastmed.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.JOB_OR_CAREER);
+    }
+  },
+  {
     name: "classifies a retail promo when unsubscribe and promo language are present",
     run() {
       const result = evaluateEmail({
@@ -254,6 +268,32 @@ const tests = [
     }
   },
   {
+    name: "classifies streaming watchlists as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "This watchlist will put Spring into your step.",
+        plainTextBody: "Explore your watchlist and discover new titles to stream this week.",
+        senderDomain: "notifications.pluto.tv",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies tax product surveys as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "A 2-minute survey about TurboTax.",
+        plainTextBody: "Tell us how we did in this 2-minute survey about your recent filing experience.",
+        senderDomain: "em1.turbotax.intuit.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "classifies canva feature marketing as product or newsletter",
     run() {
       const result = evaluateEmail({
@@ -320,6 +360,30 @@ const tests = [
 
       assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
       assert.ok(result.classification.urgencyScore >= 75);
+    }
+  },
+  {
+    name: "classifies id verification emails as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "Action needed: ID verification needed",
+        plainTextBody: "Complete your ID verification to continue using your account.",
+        senderDomain: "go.quick.md"
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
+    }
+  },
+  {
+    name: "classifies new device sign-ins as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "A new device is signed in to your Peacock account",
+        plainTextBody: "A new device is signed in to your Peacock account. Review this sign-in activity now.",
+        senderDomain: "messaging.peacocktv.com"
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
     }
   },
   {
@@ -429,6 +493,18 @@ const tests = [
     }
   },
   {
+    name: "classifies evisa readiness mail as travel",
+    run() {
+      const result = evaluateEmail({
+        subject: "Important: Your Brazil eVisa Is Ready! Visa Number: 260331-505323",
+        plainTextBody: "Your Brazil eVisa is ready. Visa number 260331-505323. Review your travel documents before departure.",
+        senderDomain: "vfsevisa.com"
+      });
+
+      assert.equal(result.classification.category, Category.TRAVEL);
+    }
+  },
+  {
     name: "classifies promo discount emails as retail promo",
     run() {
       const result = evaluateEmail({
@@ -522,6 +598,82 @@ const tests = [
 
       assert.equal(result.classification.category, Category.RETAIL_PROMO);
       assert.notEqual(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies free bottle consumer promos as shopping",
+    run() {
+      const result = evaluateEmail({
+        subject: "FREE bottle on your next order",
+        plainTextBody: "Claim your free bottle on your next order and manage preferences or unsubscribe anytime.",
+        senderDomain: "liquid-iv.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.SHOPPING);
+    }
+  },
+  {
+    name: "classifies merch pre-launch drops as shopping",
+    run() {
+      const result = evaluateEmail({
+        subject: "Adidas VIRGINIA Vario FLAT EARTHER Exclusive 24 Hour Pre-Launch",
+        plainTextBody: "Be one of the first to get a pair of VIRGINIA Vario FLAT EARTHERS.",
+        senderDomain: "help.blackyachtrock.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.SHOPPING);
+    }
+  },
+  {
+    name: "classifies product launch emails as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "The browser agent platform is here",
+        plainTextBody: "The browser agent platform is here. Learn what's new and explore the launch.",
+        senderDomain: "hello.browserbase.com",
+        labels: ["CATEGORY_UPDATES"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies payroll reminders as payment receipts",
+    run() {
+      const result = evaluateEmail({
+        subject: "ePayStub Reminder",
+        plainTextBody: "Your ePayStub is ready to view. Sign in to review your pay statement.",
+        senderDomain: "epaystub.insperityservices.com"
+      });
+
+      assert.equal(result.classification.category, Category.PAYMENT_RECEIPT);
+    }
+  },
+  {
+    name: "classifies personal forwards from hotmail as personal",
+    run() {
+      const result = evaluateEmail({
+        subject: "Fw: Move in Reminders",
+        plainTextBody: "Forwarded message with move in reminders and apartment notes.",
+        senderDomain: "hotmail.com"
+      });
+
+      assert.equal(result.classification.category, Category.PERSONAL);
+    }
+  },
+  {
+    name: "classifies ticket promos as raffle or giveaway when winning language appears",
+    run() {
+      const result = evaluateEmail({
+        subject: "Download. Enter. Score Match Tickets.",
+        plainTextBody: "Download the app, enter now, and score match tickets before the winner is announced.",
+        senderDomain: "mg.homedepot.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.RAFFLE_OR_GIVEAWAY);
     }
   },
   {

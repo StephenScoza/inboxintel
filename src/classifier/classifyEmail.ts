@@ -139,9 +139,14 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     "opentable.com",
     "coinbase.com",
     "quick.md",
+    "browserbase.com",
     "akamai.com",
+    "pluto.tv",
+    "freetaxusa.com",
     "audible.com",
+    "amcplus.com",
     "certifiedmaillabels.com",
+    "leafwell.com",
     "peacocktv.com",
     "umusic-online.com"
   ]
@@ -224,9 +229,13 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "chipotle.com",
     "coldstonecreamery.com",
     "groupon.com",
+    "homedepot.com",
+    "ihop.com",
+    "liquid-iv.com",
     "snipesusa.com",
     "topcashback.com",
     "panerabread.com",
+    "whiteowlcigar.com",
     "vitacoco.com",
     "vitacost.com",
     "yeezy.com",
@@ -234,9 +243,37 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "sneakersnstuff.com",
     "stadiumgoods.com",
     "steelseries.com",
+    "blackyachtrock.com",
+    "beaspunge.com",
+    "booksy.net",
+    "jjjjound.com",
     "umusic-online.com",
+    "taylorswift.com",
     "libertycannabis.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function isTravelDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return [
+    "enterprise.com",
+    "customer.em.com",
+    "visa.vfsevisa.com",
+    "vfsevisa.com"
+  ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function isPayrollDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return ["insperityservices.com", "adp.com", "paychex.com"].some(
+    (domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`)
+  );
 }
 
 function dedupePhrases(values: string[]): string[] {
@@ -417,6 +454,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       unsubscribeHits.length > 0 ||
       input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") ||
       isCommerceDomain(input.senderDomain));
+  const likelyTravelFallback =
+    isTravelDomain(input.senderDomain) &&
+    (travelHits.length > 0 || hasAnyKeyword(combinedText, ["rental", "visa", "evisa", "check-in"]));
+  const likelyPayrollFallback =
+    isPayrollDomain(input.senderDomain) &&
+    hasAnyKeyword(combinedText, ["epaystub", "paystub", "pay stub", "view paycheck", "pay statement"]);
 
   const closestDate = detectClosestDate(input.dates);
   const reasons: string[] = [];
@@ -483,12 +526,24 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 40;
     opportunityScore = 48;
     confidence = 88;
+  } else if (likelyPayrollFallback) {
+    category = Category.PAYMENT_RECEIPT;
+    reasons.push(`Matched payroll sender fallback: ${input.senderDomain}`);
+    urgencyScore = 34;
+    opportunityScore = 22;
+    confidence = 82;
   } else if (shippingHits.length) {
     category = Category.ORDER_OR_SHIPPING;
     reasons.push(`Matched order or shipping keywords: ${dedupePhrases(shippingHits).join(", ")}`);
     urgencyScore = 50;
     opportunityScore = 25;
     confidence = 87;
+  } else if (likelyTravelFallback) {
+    category = Category.TRAVEL;
+    reasons.push(`Matched travel sender fallback: ${input.senderDomain}`);
+    urgencyScore = 42;
+    opportunityScore = 18;
+    confidence = 82;
   } else if (bankingHits.length || likelyBankingFallback) {
     category = Category.BANKING;
     reasons.push(
@@ -612,7 +667,7 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 20;
     opportunityScore = input.signals.likelyMarketing ? 30 : 18;
     confidence = 80;
-  } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|icloud\.com/i.test(input.senderDomain)) {
+  } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|hotmail\.com|live\.com|msn\.com|icloud\.com/i.test(input.senderDomain)) {
     category = Category.PERSONAL;
     reasons.push("Sender uses a common personal mailbox domain.");
     urgencyScore = 15;

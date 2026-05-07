@@ -41,7 +41,10 @@ export const KEYWORDS = {
     "itinerary",
     "reservation",
     "car rental",
-    "gate change"
+    "gate change",
+    "rental",
+    "evisa",
+    "visa number"
   ],
   job: [
     "interview",
@@ -50,8 +53,7 @@ export const KEYWORDS = {
     "hiring",
     "job opportunity",
     "candidate",
-    "resume",
-    "position"
+    "resume"
   ],
   healthcare: [
     "appointment",
@@ -111,6 +113,10 @@ export const KEYWORDS = {
     "trend report",
     "trending titles",
     "top picks for you",
+    "watchlist",
+    "feedback",
+    "2-minute survey",
+    "tell us how we did",
     "weekly schedule",
     "restaurant picks",
     "new restaurants",
@@ -131,6 +137,8 @@ export const KEYWORDS = {
     "compliance mail",
     "learn more now",
     "book a demo call",
+    "webinar",
+    "platform is here",
     "gemini",
     "update to our privacy policy",
     "policy update"
@@ -155,7 +163,11 @@ export const KEYWORDS = {
     "cash back",
     "wallet",
     "boutique",
-    "collection"
+    "collection",
+    "free bottle",
+    "pre-launch",
+    "vinyl",
+    "gear up"
   ],
   freeTrial: [
     "trial ends",
@@ -188,7 +200,10 @@ export const KEYWORDS = {
     "purchase was charged",
     "charged to your account",
     "charged to your card",
-    "billing receipt"
+    "billing receipt",
+    "epaystub",
+    "paystub reminder",
+    "pay stub"
   ],
   priceIncrease: [
     "price increase",
@@ -207,7 +222,16 @@ export const KEYWORDS = {
     "problem with your payment",
     "retry payment"
   ],
-  raffle: ["raffle", "giveaway", "draw closes", "enter to win", "sweepstakes", "winner announced"],
+  raffle: [
+    "raffle",
+    "giveaway",
+    "draw closes",
+    "enter to win",
+    "sweepstakes",
+    "winner announced",
+    "could win",
+    "score match tickets"
+  ],
   opportunity: [
     "paid opinion study",
     "paid study",
@@ -234,8 +258,11 @@ export const KEYWORDS = {
   security: [
     "security alert",
     "new login",
+    "new device is signed in",
     "password changed",
     "suspicious activity",
+    "id verification needed",
+    "id verification",
     "verification code",
     "sign-in attempt",
     "two-factor",
@@ -252,7 +279,8 @@ export const KEYWORDS = {
     "membership",
     "monthly plan",
     "annual plan",
-    "billing period"
+    "billing period",
+    "stream new episodes"
   ],
   retail: [
     "sale",
@@ -268,7 +296,11 @@ export const KEYWORDS = {
     "just dropped",
     "buy 3, get 1 free",
     "buy 2, get 1 free",
-    "opt-out"
+    "opt-out",
+    "spring black friday",
+    "deals start today",
+    "happy easter",
+    "happy hours"
   ],
   unsubscribe: ["unsubscribe", "manage preferences", "email preferences"],
   urgent: ["ends today", "expires today", "last chance", "deadline", "final reminder", "ending soon", "act now"]
