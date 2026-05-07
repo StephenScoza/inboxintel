@@ -4,6 +4,7 @@ import { sendDiscordAlert } from "../alerts/discord";
 import { shouldSuppressAlert } from "../alerts/policy";
 import { prisma } from "../db";
 import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
+import { buildPersistedAmounts, buildPersistedClassificationSignals, buildPersistedDates } from "../intelligence/persistedSnapshot";
 import {
   chooseImportantDate,
   chooseSubscriptionAmount,
@@ -14,6 +15,7 @@ import { cleanSenderName, deriveVendorIdentity } from "../intelligence/vendorIde
 import { extractBody } from "../parser/extractBody";
 import { extractHeaders } from "../parser/extractHeaders";
 import { extractLinks } from "../parser/extractLinks";
+import { buildPersistedEmailLinks } from "../parser/persistLinks";
 import { logger } from "../utils/logger";
 import { recordParseIssue, resolveParseIssuesForMessage } from "../utils/parseIssues";
 import { sanitizeJsonValue, sanitizeText } from "../utils/safeJson";
@@ -72,14 +74,6 @@ function isPrismaInvalidArgError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: string }).code === "InvalidArg"
   );
-}
-
-function isOversizedIndexError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("index row size");
-}
-
-function canSafelyPersistLink(url: string | null): boolean {
-  return typeof url === "string" && url.length <= 1800;
 }
 
 export async function processEmail(message: gmail_v1.Schema$Message, context: ProcessContext) {
@@ -160,6 +154,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     domain: sanitizeText(link.domain) ?? null,
     text: sanitizeText(link.text) ?? null
   }));
+  const persistedLinks = buildPersistedEmailLinks(links);
   const intelligence = buildEmailIntelligence({
     subject,
     snippet: message.snippet ?? null,
@@ -221,8 +216,8 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     rawPayload: undefined,
     headersJson: technicalMetadata.headersJson as unknown as Prisma.InputJsonValue,
     technicalFactsJson: technicalMetadata.technicalFactsJson as unknown as Prisma.InputJsonValue,
-    amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
-    datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue,
+    amountsJson: sanitizeJsonValue(buildPersistedAmounts(intelligence)) as unknown as Prisma.InputJsonValue,
+    datesJson: sanitizeJsonValue(buildPersistedDates(intelligence)) as unknown as Prisma.InputJsonValue,
     gmailAccountId: context.gmailAccountId,
     senderId: sender?.id ?? null
   };
@@ -233,7 +228,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     urgencyScore: intelligence.classification.urgencyScore,
     opportunityScore: intelligence.classification.opportunityScore,
     reasons: intelligence.classification.reasons,
-    signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+    signalsJson: sanitizeJsonValue(buildPersistedClassificationSignals(intelligence)) as unknown as Prisma.InputJsonValue
   };
 
   const minimalEmailData = {
@@ -399,11 +394,18 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         ...classificationData
       }
     });
-    await resolveParseIssuesForMessage({
-      gmailMessageId: message.id,
-      stage: ParseIssueStage.INGEST,
-      issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
-    });
+    await Promise.all([
+      resolveParseIssuesForMessage({
+        gmailMessageId: message.id,
+        stage: ParseIssueStage.INGEST,
+        issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
+      }),
+      resolveParseIssuesForMessage({
+        gmailMessageId: message.id,
+        stage: ParseIssueStage.REPROCESS,
+        issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
+      })
+    ]);
   } catch (error) {
     if (!isPrismaInvalidArgError(error)) {
       logger.error("Classification create failed", {
@@ -465,28 +467,19 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   }
 
   let skippedLinkCount = 0;
-  for (const link of links) {
-    if (!canSafelyPersistLink(link.url)) {
-      logger.warn("Skipping oversized email link", {
-        gmailMessageId: message.id,
-        emailId: email.id,
-        urlLength: link.url?.length ?? 0
-      });
-      skippedLinkCount += 1;
-      continue;
-    }
-
+  for (const link of persistedLinks) {
     try {
       await prisma.emailLink.create({
         data: {
           emailId: email.id,
           url: link.url,
+          urlHash: link.urlHash,
           domain: link.domain,
           text: link.text
         }
       });
     } catch (error) {
-      if (!isPrismaInvalidArgError(error) && !isOversizedIndexError(error)) {
+      if (!isPrismaInvalidArgError(error)) {
         logger.error("Email link create failed", {
           gmailMessageId: message.id,
           emailId: email.id,
@@ -496,7 +489,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         throw error;
       }
 
-      logger.warn("Skipping malformed or oversized email link", {
+      logger.warn("Skipping malformed email link", {
         gmailMessageId: message.id,
         emailId: email.id,
         url: link.url
@@ -520,11 +513,18 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
       }
     });
   } else {
-    await resolveParseIssuesForMessage({
-      gmailMessageId: message.id,
-      stage: ParseIssueStage.INGEST,
-      issueTypes: [ParseIssueType.LINK_SKIPPED]
-    });
+    await Promise.all([
+      resolveParseIssuesForMessage({
+        gmailMessageId: message.id,
+        stage: ParseIssueStage.INGEST,
+        issueTypes: [ParseIssueType.LINK_SKIPPED]
+      }),
+      resolveParseIssuesForMessage({
+        gmailMessageId: message.id,
+        stage: ParseIssueStage.REPROCESS,
+        issueTypes: [ParseIssueType.LINK_SKIPPED]
+      })
+    ]);
   }
 
   logger.info("Stored Gmail message", {

@@ -18,7 +18,7 @@ COPY tests ./tests
 COPY .env.example ./
 COPY README.md ./
 
-RUN npm run build
+RUN rm -rf dist && npm run build
 
 ENV NODE_ENV=production
 EXPOSE 3217

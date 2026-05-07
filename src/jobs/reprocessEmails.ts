@@ -8,8 +8,15 @@ import {
   shouldTrackSubscription
 } from "../intelligence/subscriptionFacts";
 import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
+import {
+  buildPersistedAmounts,
+  buildPersistedClassificationSignals,
+  buildPersistedDates
+} from "../intelligence/persistedSnapshot";
 import { deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { sendDiscordAlert } from "../alerts/discord";
+import { extractLinks } from "../parser/extractLinks";
+import { buildPersistedEmailLinks } from "../parser/persistLinks";
 import { logger } from "../utils/logger";
 import { recordParseIssue, resolveParseIssuesForMessage } from "../utils/parseIssues";
 import { sanitizeJsonValue } from "../utils/safeJson";
@@ -139,23 +146,64 @@ async function maybeCreateAlertsForReprocessedEmail(params: {
 }
 
 export async function runReprocess(limit?: number) {
-  const emails = await prisma.email.findMany({
-    include: {
-      links: true,
-      classification: true,
-      gmailAccount: true,
-      sender: true
-    },
-    orderBy: {
-      receivedAt: "desc"
-    },
-    take: limit
-  });
+  const limitClause = typeof limit === "number" && Number.isFinite(limit) ? `LIMIT ${Math.max(1, Math.floor(limit))}` : "";
+  const emailRefs = await prisma.$queryRawUnsafe<Array<{
+    id: string;
+    gmailMessageId: string;
+    gmailAccountId: string;
+  }>>(
+    `SELECT "id", "gmailMessageId", "gmailAccountId"
+     FROM "Email"
+     ORDER BY "receivedAt" DESC NULLS LAST
+     ${limitClause}`
+  );
 
   let updated = 0;
   let failed = 0;
 
-  for (const email of emails) {
+  for (const emailRef of emailRefs) {
+    let email;
+    try {
+      email = await prisma.email.findUnique({
+        where: {
+          id: emailRef.id
+        },
+        include: {
+          links: true,
+          classification: true,
+          gmailAccount: true,
+          sender: true
+        }
+      });
+    } catch (error) {
+      failed += 1;
+      logger.error("Failed to load stored email for reprocess", {
+        emailId: emailRef.id,
+        gmailMessageId: emailRef.gmailMessageId,
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+      await recordParseIssue({
+        emailId: emailRef.id,
+        gmailAccountId: emailRef.gmailAccountId,
+        gmailMessageId: emailRef.gmailMessageId,
+        issueType: ParseIssueType.PROCESSING_FAILED,
+        stage: ParseIssueStage.REPROCESS,
+        severity: ParseIssueSeverity.ERROR,
+        summary: "Stored email could not be loaded for reprocess",
+        details: {
+          emailId: emailRef.id,
+          error: error instanceof Error ? error.message : "Unknown error"
+        }
+      });
+      continue;
+    }
+
+    if (!email) {
+      continue;
+    }
+
+    const extractedLinks = extractLinks(email.plainTextBody, email.htmlBody);
+    const persistedLinks = buildPersistedEmailLinks(extractedLinks);
     const intelligence = buildEmailIntelligence({
       subject: email.subject,
       snippet: email.snippet,
@@ -163,11 +211,13 @@ export async function runReprocess(limit?: number) {
       htmlBody: email.htmlBody,
       labels: email.gmailLabels,
       senderDomain: email.senderDomain,
-      links: email.links.map((link) => ({
-        url: link.url,
-        domain: link.domain,
-        text: link.text
-      }))
+      links: extractedLinks.length > 0
+        ? extractedLinks
+        : email.links.map((link) => ({
+          url: link.url,
+          domain: link.domain,
+          text: link.text
+        }))
     });
 
     try {
@@ -183,7 +233,7 @@ export async function runReprocess(limit?: number) {
             urgencyScore: intelligence.classification.urgencyScore,
             opportunityScore: intelligence.classification.opportunityScore,
             reasons: intelligence.classification.reasons,
-            signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+            signalsJson: sanitizeJsonValue(buildPersistedClassificationSignals(intelligence)) as unknown as Prisma.InputJsonValue
           },
           create: {
             emailId: email.id,
@@ -192,14 +242,21 @@ export async function runReprocess(limit?: number) {
             urgencyScore: intelligence.classification.urgencyScore,
             opportunityScore: intelligence.classification.opportunityScore,
             reasons: intelligence.classification.reasons,
-            signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
+            signalsJson: sanitizeJsonValue(buildPersistedClassificationSignals(intelligence)) as unknown as Prisma.InputJsonValue
           }
         });
-        await resolveParseIssuesForMessage({
-          gmailMessageId: email.gmailMessageId,
-          stage: ParseIssueStage.REPROCESS,
-          issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
-        });
+        await Promise.all([
+          resolveParseIssuesForMessage({
+            gmailMessageId: email.gmailMessageId,
+            stage: ParseIssueStage.REPROCESS,
+            issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
+          }),
+          resolveParseIssuesForMessage({
+            gmailMessageId: email.gmailMessageId,
+            stage: ParseIssueStage.INGEST,
+            issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
+          })
+        ]);
       } catch (error) {
         if (!isPrismaInvalidArgError(error)) {
           throw error;
@@ -256,8 +313,8 @@ export async function runReprocess(limit?: number) {
         await prisma.email.update({
           where: { id: email.id },
           data: {
-            amountsJson: sanitizeJsonValue(intelligence.amounts) as unknown as Prisma.InputJsonValue,
-            datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
+            amountsJson: sanitizeJsonValue(buildPersistedAmounts(intelligence)) as unknown as Prisma.InputJsonValue,
+            datesJson: sanitizeJsonValue(buildPersistedDates(intelligence)) as unknown as Prisma.InputJsonValue
           }
         });
         await resolveParseIssuesForMessage({
@@ -296,6 +353,89 @@ export async function runReprocess(limit?: number) {
           details: {
             emailId: email.id,
             category: intelligence.classification.category
+          }
+        });
+      }
+
+      let skippedLinkCount = 0;
+      for (const link of persistedLinks) {
+        try {
+          await prisma.emailLink.upsert({
+            where: {
+              emailId_urlHash: {
+                emailId: email.id,
+                urlHash: link.urlHash
+              }
+            },
+            update: {
+              url: link.url,
+              domain: link.domain,
+              text: link.text
+            },
+            create: {
+              emailId: email.id,
+              url: link.url,
+              urlHash: link.urlHash,
+              domain: link.domain,
+              text: link.text
+            }
+          });
+        } catch (error) {
+          if (!isPrismaInvalidArgError(error)) {
+            throw error;
+          }
+
+          skippedLinkCount += 1;
+          logger.warn("Skipping malformed email link during reprocess", {
+            emailId: email.id,
+            gmailMessageId: email.gmailMessageId,
+            url: link.url
+          });
+        }
+      }
+
+      if (skippedLinkCount === 0) {
+        if (persistedLinks.length > 0) {
+          await prisma.emailLink.deleteMany({
+            where: {
+              emailId: email.id,
+              urlHash: {
+                notIn: persistedLinks.map((link) => link.urlHash)
+              }
+            }
+          });
+        } else if (email.links.length > 0) {
+          await prisma.emailLink.deleteMany({
+            where: {
+              emailId: email.id
+            }
+          });
+        }
+
+        await Promise.all([
+          resolveParseIssuesForMessage({
+            gmailMessageId: email.gmailMessageId,
+            stage: ParseIssueStage.REPROCESS,
+            issueTypes: [ParseIssueType.LINK_SKIPPED]
+          }),
+          resolveParseIssuesForMessage({
+            gmailMessageId: email.gmailMessageId,
+            stage: ParseIssueStage.INGEST,
+            issueTypes: [ParseIssueType.LINK_SKIPPED]
+          })
+        ]);
+      } else {
+        await recordParseIssue({
+          emailId: email.id,
+          gmailAccountId: email.gmailAccountId,
+          gmailMessageId: email.gmailMessageId,
+          issueType: ParseIssueType.LINK_SKIPPED,
+          stage: ParseIssueStage.REPROCESS,
+          severity: ParseIssueSeverity.WARN,
+          summary: "One or more links could not be rebuilt during reprocess",
+          details: {
+            emailId: email.id,
+            skippedLinkCount
           }
         });
       }

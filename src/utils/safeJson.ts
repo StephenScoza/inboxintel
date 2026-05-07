@@ -1,5 +1,38 @@
+function normalizeBrokenSurrogates(value: string): string {
+  let output = "";
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        output += value[index] + value[index + 1];
+        index += 1;
+      } else {
+        output += "\uFFFD";
+      }
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      output += "\uFFFD";
+      continue;
+    }
+
+    if (code === 0x0000) {
+      output += " ";
+      continue;
+    }
+
+    output += value[index];
+  }
+
+  return output;
+}
+
 export function sanitizeJsonString(value: string): string {
-  return value
+  return normalizeBrokenSurrogates(value)
     .replace(/\\x/g, "\\\\x")
     .replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u");
 }

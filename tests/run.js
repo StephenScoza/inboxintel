@@ -2,6 +2,11 @@ const assert = require("node:assert/strict");
 const { AlertType, Category } = require("@prisma/client");
 const { buildEmailIntelligence } = require("../dist/intelligence/buildEmailIntelligence.js");
 const {
+  buildPersistedAmounts,
+  buildPersistedClassificationSignals,
+  buildPersistedDates
+} = require("../dist/intelligence/persistedSnapshot.js");
+const {
   cleanSenderName,
   deriveVendorIdentity,
   extractDomainRoot
@@ -14,6 +19,7 @@ const {
   extractUnsubscribeTargets
 } = require("../dist/intelligence/mailingListInsights.js");
 const { extractHeaders } = require("../dist/parser/extractHeaders.js");
+const { buildEmailLinkHash, buildPersistedEmailLinks } = require("../dist/parser/persistLinks.js");
 const { sanitizeJsonString } = require("../dist/utils/safeJson.js");
 
 function evaluateEmail(overrides = {}) {
@@ -1177,6 +1183,7 @@ const tests = [
     name: "sanitizes invalid json-style hex escapes from payload strings",
     run() {
       assert.equal(sanitizeJsonString(String.raw`bad \x escape`), String.raw`bad \\x escape`);
+      assert.equal(sanitizeJsonString("bad\uD83Dtext"), "bad\uFFFDtext");
     }
   },
   {
@@ -1212,6 +1219,56 @@ const tests = [
       assert.equal(metadata.technicalFactsJson.hasAuthenticationResults, true);
       assert.equal(metadata.technicalFactsJson.hasListHeaders, true);
       assert.equal(metadata.technicalFactsJson.isAutoSubmitted, true);
+    }
+  },
+  {
+    name: "compacts persisted intelligence payloads for noisy emails",
+    run() {
+      const noisyBody = `${"sale ".repeat(40)} ${"ends tonight ".repeat(30)} ${"March 30, 2026 ".repeat(4)} $125 ${"cash back ".repeat(35)}`;
+      const intelligence = evaluateEmail({
+        subject: "Huge promo payload",
+        plainTextBody: noisyBody,
+        htmlBody: noisyBody,
+        senderDomain: "topcashback.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      const persistedSignals = buildPersistedClassificationSignals(intelligence);
+      const persistedAmounts = buildPersistedAmounts(intelligence);
+      const persistedDates = buildPersistedDates(intelligence);
+
+      assert.ok(Array.isArray(persistedSignals.retailHits));
+      assert.ok((persistedSignals.signalContexts.retail ?? []).length <= 8);
+      assert.ok((persistedSignals.signalContexts.retail ?? []).every((entry) => (entry.context ?? "").length <= 180));
+      assert.ok(persistedAmounts.every((entry) => (entry.context ?? "").length <= 180));
+      assert.ok(persistedDates.every((entry) => (entry.context ?? "").length <= 180));
+    }
+  },
+  {
+    name: "hashes and dedupes persisted email links by stable url hash",
+    run() {
+      const links = buildPersistedEmailLinks([
+        {
+          url: "https://example.com/really/long/link?foo=1",
+          domain: "example.com",
+          text: "first"
+        },
+        {
+          url: "https://example.com/really/long/link?foo=1",
+          domain: "example.com",
+          text: "duplicate"
+        },
+        {
+          url: "https://example.com/really/long/link?foo=2",
+          domain: "example.com",
+          text: "second"
+        }
+      ]);
+
+      assert.equal(links.length, 2);
+      assert.equal(links[0].urlHash, buildEmailLinkHash("https://example.com/really/long/link?foo=1"));
+      assert.equal(links[0].urlHash.length, 64);
+      assert.notEqual(links[0].urlHash, links[1].urlHash);
     }
   },
   {
