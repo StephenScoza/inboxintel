@@ -149,7 +149,8 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     "leafwell.com",
     "onedrive.com",
     "peacocktv.com",
-    "umusic-online.com"
+    "umusic-online.com",
+    "nikeshoebot.com"
   ]
     .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
@@ -288,7 +289,24 @@ function isTravelDomain(senderDomain: string | null): boolean {
     "customer.em.com",
     "visa.vfsevisa.com",
     "vfsevisa.com",
-    "aaa-cluballiance.com"
+    "aaa-cluballiance.com",
+    "royalcaribbean.com",
+    "royalcaribbeanmarketing.com"
+  ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
+}
+
+function isHealthcareDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return [
+    "quick.md",
+    "leafwell.com",
+    "umzu.com",
+    "optum.com",
+    "cvs.com",
+    "zennioptical.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -356,6 +374,10 @@ function filterReceiptMatches(
     const context = match.context.toLowerCase();
 
     if (match.phrase === "receipt") {
+      if (likelyMarketing && hasAnyKeyword(context, ["coupon", "coupons", "reward", "offer", "promo", "claim"])) {
+        return false;
+      }
+
       return hasAnyKeyword(context, [
         "purchase",
         "transaction",
@@ -477,8 +499,7 @@ function filterSubscriptionMatches(
         "subscription charge",
         "subscription plan",
         "manage subscription",
-        "cancel subscription",
-        "your subscription"
+        "cancel subscription"
       ]);
     }
 
@@ -522,7 +543,8 @@ function isWeakSocialPhrase(phrase: string): boolean {
 function filterShippingMatches(
   matches: ExtractedSignals["shipping"],
   labels: string[],
-  senderDomain: string | null
+  senderDomain: string | null,
+  likelyMarketing: boolean
 ): ExtractedSignals["shipping"] {
   const hasPurchaseLabel = labels.includes("CATEGORY_PURCHASES");
   const shippingDomain = isShippingDomain(senderDomain);
@@ -547,6 +569,15 @@ function filterShippingMatches(
     }
 
     if (match.phrase === "shipped") {
+      if (
+        likelyMarketing &&
+        !shippingDomain &&
+        !hasPurchaseLabel &&
+        hasAnyKeyword(context, ["get samsung", "stream", "watch", "offer", "deal", "promo"])
+      ) {
+        return false;
+      }
+
       return (
         hasPurchaseLabel ||
         shippingDomain ||
@@ -609,6 +640,17 @@ function filterGovernmentMatches(
 
   return matches.filter((match) => {
     const context = match.context.toLowerCase();
+
+    if (match.phrase === "dmv") {
+      return governmentSender || hasAnyKeyword(context, [
+        "driver license",
+        "drivers license",
+        "motor vehicles",
+        "vehicle registration",
+        "license renewal",
+        "state id"
+      ]);
+    }
 
     if (match.phrase === "medicare" || match.phrase === "medicaid") {
       if (governmentSender) {
@@ -739,7 +781,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     input.signals.likelyMarketing,
     input.subject
   );
-  const filteredShippingMatches = filterShippingMatches(input.signals.shipping, input.labels, input.senderDomain);
+  const filteredShippingMatches = filterShippingMatches(
+    input.signals.shipping,
+    input.labels,
+    input.senderDomain,
+    input.signals.likelyMarketing
+  );
   const filteredShoppingMatches = filterShoppingMatches(input.signals.shopping, input.senderDomain);
   const filteredSubscriptionMatches = filterSubscriptionMatches(
     input.signals.subscription,
@@ -817,7 +864,22 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       isCommerceDomain(input.senderDomain));
   const likelyTravelFallback =
     isTravelDomain(input.senderDomain) &&
-    (travelHits.length > 0 || hasAnyKeyword(combinedText, ["rental", "visa", "evisa", "check-in", "roadside"]));
+    (travelHits.length > 0 ||
+      hasAnyKeyword(combinedText, ["rental", "visa", "evisa", "check-in", "roadside", "cruise", "voyage", "sailing"]));
+  const likelyHealthcareFallback =
+    isHealthcareDomain(input.senderDomain) &&
+    hasAnyKeyword(combinedText, [
+      "health",
+      "wellness",
+      "pharmacy",
+      "prescription",
+      "doctor",
+      "medical",
+      "glasses",
+      "vision",
+      "belly",
+      "symptom"
+    ]);
   const likelyPayrollFallback =
     isPayrollDomain(input.senderDomain) &&
     hasAnyKeyword(combinedText, ["epaystub", "paystub", "pay stub", "view paycheck", "pay statement"]);
@@ -1021,6 +1083,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 44;
     opportunityScore = 20;
     confidence = 84;
+  } else if (likelyHealthcareFallback) {
+    category = Category.HEALTHCARE;
+    reasons.push(`Matched healthcare sender fallback: ${input.senderDomain}`);
+    urgencyScore = 40;
+    opportunityScore = 18;
+    confidence = 78;
   } else if (healthcareHits.length) {
     category = Category.HEALTHCARE;
     reasons.push(`Matched healthcare keywords: ${healthcareHits.join(", ")}`);
@@ -1147,6 +1215,15 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 18;
     opportunityScore = 16;
     confidence = 78;
+  } else if (
+    isShippingDomain(input.senderDomain) &&
+    hasAnyKeyword(combinedText, ["package pickup request", "pickup request", "mailpiece", "package pickup"])
+  ) {
+    category = Category.ORDER_OR_SHIPPING;
+    reasons.push(`Matched shipping sender fallback: ${input.senderDomain}`);
+    urgencyScore = 46;
+    opportunityScore = 18;
+    confidence = 82;
   } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|hotmail\.com|live\.com|msn\.com|icloud\.com/i.test(input.senderDomain)) {
     category = Category.PERSONAL;
     reasons.push("Sender uses a common personal mailbox domain.");

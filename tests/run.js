@@ -295,6 +295,20 @@ const tests = [
     }
   },
   {
+    name: "classifies cruise promo mail as travel instead of unknown",
+    run() {
+      const result = evaluateEmail({
+        subject: "ENDS TOMORROW! Summer cruises as low as $349",
+        plainTextBody: "Plan your next cruise vacation with Royal Caribbean and sail away this summer.",
+        senderDomain: "reply.royalcaribbeanmarketing.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.TRAVEL);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
     name: "classifies tax product surveys as product or newsletter",
     run() {
       const result = evaluateEmail({
@@ -550,6 +564,20 @@ const tests = [
     }
   },
   {
+    name: "does not classify pluto tv promos as government from dmv false positives",
+    run() {
+      const result = evaluateEmail({
+        subject: "Come back for free movies and TV.",
+        plainTextBody: "Stream free movies and tv this week on Pluto TV.",
+        senderDomain: "notifications.pluto.tv",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.GOVERNMENT);
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "classifies promo discount emails as retail promo",
     run() {
       const result = evaluateEmail({
@@ -578,6 +606,19 @@ const tests = [
     }
   },
   {
+    name: "classifies software bot marketing as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "NSB ate & left no crumbs for any competitor!",
+        plainTextBody: "See what happened inside NikeShoeBot this week and catch the latest bot updates.",
+        senderDomain: "support.nikeshoebot.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "does not classify generic promo emails as product newsletter from footer policy text alone",
     run() {
       const result = evaluateEmail({
@@ -599,6 +640,19 @@ const tests = [
       });
 
       assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies wellness marketing from healthcare senders",
+    run() {
+      const result = evaluateEmail({
+        subject: "Belly about to burst? Try these 11 fixes",
+        plainTextBody: "Wellness support and digestive health tips to help with bloating and gut symptoms.",
+        senderDomain: "email.umzu.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.HEALTHCARE);
     }
   },
   {
@@ -655,6 +709,19 @@ const tests = [
       });
 
       assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "does not classify device promos as shipping from shipped wording alone",
+    run() {
+      const result = evaluateEmail({
+        subject: "Be the first to get Samsung Galaxy S26+ on us",
+        plainTextBody: "This phone ships fast when you switch today. Limited-time offer from Xfinity Mobile.",
+        senderDomain: "updates.xfinity.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.ORDER_OR_SHIPPING);
     }
   },
   {
