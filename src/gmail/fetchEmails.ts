@@ -23,6 +23,20 @@ export class GmailHistoryExpiredError extends Error {
   }
 }
 
+function extractGoogleStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const candidate = error as {
+    code?: number;
+    status?: number;
+    response?: { status?: number };
+  };
+
+  return candidate.code ?? candidate.status ?? candidate.response?.status;
+}
+
 export async function fetchMessageById(
   gmail: gmail_v1.Gmail,
   messageId: string
@@ -56,21 +70,21 @@ export async function *fetchEmailsInPages(
       includeSpamTrash: false
     });
 
-    const messageRefs = listResponse.data.messages ?? [];
-    const fullMessages: gmail_v1.Schema$Message[] = [];
-
-    for (const messageRef of messageRefs) {
-      if (!messageRef.id) {
-        continue;
-      }
-
-      const fullMessage = await fetchMessageById(gmail, messageRef.id);
-      if (fullMessage) {
-        fullMessages.push(fullMessage);
-      }
-    }
-
     if (scannedPageCount >= pageOffset) {
+      const messageRefs = listResponse.data.messages ?? [];
+      const fullMessages: gmail_v1.Schema$Message[] = [];
+
+      for (const messageRef of messageRefs) {
+        if (!messageRef.id) {
+          continue;
+        }
+
+        const fullMessage = await fetchMessageById(gmail, messageRef.id);
+        if (fullMessage) {
+          fullMessages.push(fullMessage);
+        }
+      }
+
       yield {
         pageToken: currentPageToken,
         nextPageToken: listResponse.data.nextPageToken ?? undefined,
@@ -108,34 +122,34 @@ export async function *fetchHistoryInPages(
         historyTypes: ["messageAdded"]
       });
     } catch (error) {
-      const status = (error as { code?: number; status?: number }).code
-        ?? (error as { code?: number; status?: number }).status;
+      const status = extractGoogleStatus(error);
+      const message = error instanceof Error ? error.message : "";
 
-      if (status === 404) {
+      if (status === 404 || message.includes("Requested entity was not found")) {
         throw new GmailHistoryExpiredError(startHistoryId);
       }
 
       throw error;
     }
 
-    const messageIds = new Set<string>();
-    for (const historyRecord of historyResponse.data.history ?? []) {
-      for (const added of historyRecord.messagesAdded ?? []) {
-        if (added.message?.id) {
-          messageIds.add(added.message.id);
+    if (scannedPageCount >= pageOffset) {
+      const messageIds = new Set<string>();
+      for (const historyRecord of historyResponse.data.history ?? []) {
+        for (const added of historyRecord.messagesAdded ?? []) {
+          if (added.message?.id) {
+            messageIds.add(added.message.id);
+          }
         }
       }
-    }
 
-    const messages: gmail_v1.Schema$Message[] = [];
-    for (const messageId of messageIds) {
-      const fullMessage = await fetchMessageById(gmail, messageId);
-      if (fullMessage) {
-        messages.push(fullMessage);
+      const messages: gmail_v1.Schema$Message[] = [];
+      for (const messageId of messageIds) {
+        const fullMessage = await fetchMessageById(gmail, messageId);
+        if (fullMessage) {
+          messages.push(fullMessage);
+        }
       }
-    }
 
-    if (scannedPageCount >= pageOffset) {
       yield {
         historyId: historyResponse.data.historyId ?? undefined,
         pageToken: currentPageToken,

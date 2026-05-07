@@ -15,6 +15,8 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const STALE_SYNC_RUN_AGE_MS = 15 * 60 * 1000;
+
 export interface IngestRunResult {
   processed: number;
   duplicates: number;
@@ -54,6 +56,8 @@ export async function runIngestOnce(
       lastSyncedAt: new Date()
     }
   });
+
+  await markStaleSyncRuns(account.id);
 
   let processed = 0;
   let duplicates = 0;
@@ -218,6 +222,32 @@ export async function runIngestOnce(
     mode: resolvedMode,
     syncRunId: syncRun.id
   };
+}
+
+async function markStaleSyncRuns(gmailAccountId: string) {
+  const staleBefore = new Date(Date.now() - STALE_SYNC_RUN_AGE_MS);
+  const result = await prisma.syncRun.updateMany({
+    where: {
+      gmailAccountId,
+      status: SyncRunStatus.RUNNING,
+      startedAt: {
+        lt: staleBefore
+      }
+    },
+    data: {
+      status: SyncRunStatus.FAILED,
+      completedAt: new Date(),
+      errorMessage: "Marked failed after exceeding the stale sync-run timeout."
+    }
+  });
+
+  if (result.count > 0) {
+    logger.warn("Marked stale sync runs as failed", {
+      gmailAccountId,
+      staleRunCount: result.count,
+      staleAfterMs: STALE_SYNC_RUN_AGE_MS
+    });
+  }
 }
 
 function buildRunNotes(
