@@ -70,6 +70,19 @@ enum ParseIssueSeverity {
   ERROR
 }
 
+enum SyncRunMode {
+  INCREMENTAL
+  FULL
+  BACKFILL
+  RECOVERY
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 model GmailAccount {
   id            String         @id @default(cuid())
   email         String         @unique
@@ -82,6 +95,7 @@ model GmailAccount {
   subscriptions Subscription[]
   alerts        Alert[]
   parseIssues   ParseIssue[]
+  syncRuns      SyncRun[]
 }
 
 model Email {
@@ -231,4 +245,24 @@ model ParseIssue {
   gmailAccount   GmailAccount?      @relation(fields: [gmailAccountId], references: [id], onDelete: SetNull)
 
   @@unique([gmailMessageId, issueType, stage])
+}
+
+model SyncRun {
+  id               String        @id @default(cuid())
+  gmailAccountId   String?
+  mode             SyncRunMode
+  status           SyncRunStatus @default(RUNNING)
+  maxPages         Int?
+  pageOffset       Int?
+  pagesProcessed   Int           @default(0)
+  processedCount   Int           @default(0)
+  duplicateCount   Int           @default(0)
+  latestHistoryId  String?
+  errorMessage     String?
+  notesJson        Json?
+  startedAt        DateTime      @default(now())
+  completedAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  gmailAccount     GmailAccount? @relation(fields: [gmailAccountId], references: [id], onDelete: SetNull)
 }

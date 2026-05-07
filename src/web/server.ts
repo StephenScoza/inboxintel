@@ -419,6 +419,7 @@ function renderPage(title: string, body: string): string {
           <a href="/emails">Emails</a>
           <a href="/senders">Senders</a>
           <a href="/mailing-lists">Mailing Lists</a>
+          <a href="/sync-runs">Sync Runs</a>
           <a href="/taxonomy-review">Taxonomy Review</a>
           <a href="/parse-issues">Parse Issues</a>
           <a href="/subscriptions">Subscriptions</a>
@@ -2290,6 +2291,102 @@ export function createWebServer() {
             <table>
               <thead><tr><th>Status</th><th>Stage</th><th>Issue Type</th><th>Severity</th><th>Email</th><th>Sender</th><th>Seen</th><th>Last Seen</th><th>Details</th></tr></thead>
               <tbody>${rows || `<tr><td colspan="9">${renderEmptyState("No parse issues tracked yet.")}</td></tr>`}</tbody>
+            </table>
+          </section>
+        </div>`
+      )
+    );
+  });
+
+  app.get("/sync-runs", async (_req, res) => {
+    const syncRuns = await prisma.syncRun.findMany({
+      include: {
+        gmailAccount: true
+      },
+      orderBy: {
+        startedAt: "desc"
+      },
+      take: 250
+    });
+
+    const totalRuns = syncRuns.length;
+    const completedRuns = syncRuns.filter((run) => run.status === "SUCCEEDED");
+    const failedRuns = syncRuns.filter((run) => run.status === "FAILED");
+    const runningRuns = syncRuns.filter((run) => run.status === "RUNNING");
+    const totalProcessed = syncRuns.reduce((sum, run) => sum + run.processedCount, 0);
+    const totalDuplicates = syncRuns.reduce((sum, run) => sum + run.duplicateCount, 0);
+    const totalPages = syncRuns.reduce((sum, run) => sum + run.pagesProcessed, 0);
+
+    const modeChart = renderHorizontalBarChart(
+      Array.from(
+        syncRuns.reduce((map, run) => {
+          map.set(run.mode, (map.get(run.mode) ?? 0) + 1);
+          return map;
+        }, new Map<string, number>())
+      )
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value),
+      {
+        valueFormatter: (value) => `${value} runs`
+      }
+    );
+
+    const productivityChart = renderHorizontalBarChart(
+      syncRuns
+        .slice(0, 12)
+        .map((run) => ({
+          label: `${run.mode} · ${formatDate(run.startedAt)}`,
+          value: run.processedCount + run.duplicateCount
+        })),
+      {
+        valueFormatter: (value) => `${value} emails`
+      }
+    );
+
+    const rows = syncRuns
+      .map((run) => {
+        const statusTone =
+          run.status === "SUCCEEDED" ? "score-low" : run.status === "FAILED" ? "score-high" : "score-medium";
+        const notes =
+          run.notesJson && typeof run.notesJson === "object" ? JSON.stringify(run.notesJson) : null;
+
+        return `<tr>
+          <td><span class="score ${statusTone}">${escapeHtml(run.status)}</span></td>
+          <td>${escapeHtml(run.mode)}</td>
+          <td>${escapeHtml(run.gmailAccount?.email ?? "n/a")}</td>
+          <td>${run.maxPages ?? "n/a"}</td>
+          <td>${run.pageOffset ?? 0}</td>
+          <td>${run.pagesProcessed}</td>
+          <td>${run.processedCount}</td>
+          <td>${run.duplicateCount}</td>
+          <td>${formatDate(run.startedAt)}</td>
+          <td>${formatDate(run.completedAt)}</td>
+          <td>${escapeHtml(run.latestHistoryId ?? "n/a")}</td>
+          <td>${escapeHtml(run.errorMessage ?? notes ?? "n/a")}</td>
+        </tr>`;
+      })
+      .join("");
+
+    res.send(
+      renderPage(
+        "Sync Runs",
+        `${renderHero("Sync run history", "Track every incremental sync, full sync, backfill, and recovery run. This gives us a durable record of inbox coverage, duplicate rate, and operational health as we process more of your mailbox.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Tracked Runs</div><div class="summary-value">${totalRuns}</div></div>
+          <div class="summary-card"><div class="summary-label">Succeeded</div><div class="summary-value">${completedRuns.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Failed</div><div class="summary-value">${failedRuns.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Running</div><div class="summary-value">${runningRuns.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Emails Seen</div><div class="summary-value">${formatCompactNumber(totalProcessed + totalDuplicates)}</div></div>
+          <div class="summary-card"><div class="summary-label">Pages Processed</div><div class="summary-value">${formatCompactNumber(totalPages)}</div></div>
+        </section>
+        <div class="grid">
+          ${renderChartCard("Run mix", "See how often we are doing incremental syncs versus full syncs, backfills, and recovery runs.", modeChart)}
+          ${renderChartCard("Recent run volume", "A quick scan of the last dozen runs by total emails touched.", productivityChart)}
+          <section>
+            <h3 class="section-title">Run ledger</h3>
+            <table>
+              <thead><tr><th>Status</th><th>Mode</th><th>Account</th><th>Max Pages</th><th>Offset</th><th>Pages</th><th>New</th><th>Duplicates</th><th>Started</th><th>Completed</th><th>History</th><th>Notes / Error</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="12">${renderEmptyState("No sync runs recorded yet.")}</td></tr>`}</tbody>
             </table>
           </section>
         </div>`

@@ -1,3 +1,4 @@
+import { Prisma, SyncRunMode, SyncRunStatus } from "@prisma/client";
 import { prisma } from "../db";
 import { config } from "../config";
 import {
@@ -14,7 +15,26 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function runIngestOnce(maxPages?: number, forceFullSync = false, pageOffset?: number) {
+export interface IngestRunResult {
+  processed: number;
+  duplicates: number;
+  pageCount: number;
+  pageOffset: number;
+  latestHistoryId: string | null;
+  nextPageToken: string | null;
+  usedIncrementalSync: boolean;
+  mode: SyncRunMode;
+  syncRunId: string;
+}
+
+export async function runIngestOnce(
+  maxPages?: number,
+  forceFullSync = false,
+  pageOffset?: number,
+  modeOverride?: SyncRunMode,
+  notes?: Record<string, unknown>,
+  startPageToken?: string
+): Promise<IngestRunResult> {
   const client = await getAuthorizedGmailClient();
   const existingAccount = await prisma.gmailAccount.findUnique({
     where: { email: client.emailAddress }
@@ -37,8 +57,23 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false, pa
   let processed = 0;
   let duplicates = 0;
   let latestHistoryId = client.historyId ?? existingAccount?.historyId ?? account.historyId;
+  let nextPageToken: string | null = startPageToken ?? null;
   let usedIncrementalSync = false;
   let pageCount = 0;
+  let syncRun = await prisma.syncRun.create({
+    data: {
+      gmailAccountId: account.id,
+      mode: modeOverride ?? (forceFullSync ? SyncRunMode.FULL : SyncRunMode.INCREMENTAL),
+      status: SyncRunStatus.RUNNING,
+      maxPages: maxPages ?? null,
+      pageOffset: pageOffset ?? 0,
+      latestHistoryId,
+      notesJson: buildRunNotes(notes, {
+        requestedPageOffset: pageOffset ?? 0,
+        startPageToken: startPageToken ?? null
+      })
+    }
+  });
 
   const processPages = async (pages: AsyncGenerator<GmailMessagePage>) => {
     for await (const page of pages) {
@@ -51,6 +86,8 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false, pa
       if (page.historyId) {
         latestHistoryId = page.historyId;
       }
+
+      nextPageToken = page.nextPageToken ?? null;
 
       for (const message of page.messages) {
         const result = await processEmail(message, {
@@ -73,14 +110,44 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false, pa
   try {
     if (existingAccount?.historyId && !forceFullSync) {
       usedIncrementalSync = true;
-      await processPages(fetchHistoryInPages(client.gmail, existingAccount.historyId, { maxPages, pageOffset }));
+      await processPages(
+        fetchHistoryInPages(client.gmail, existingAccount.historyId, {
+          maxPages,
+          pageOffset: startPageToken ? 0 : pageOffset,
+          startPageToken
+        })
+      );
     } else {
-      await processPages(fetchEmailsInPages(client.gmail, { maxPages, pageOffset }));
+      await processPages(
+        fetchEmailsInPages(client.gmail, {
+          maxPages,
+          pageOffset: startPageToken ? 0 : pageOffset,
+          startPageToken
+        })
+      );
     }
   } catch (error) {
     if (!(error instanceof GmailHistoryExpiredError)) {
       logger.error("Ingest failed before fallback", {
         error: error instanceof Error ? error.message : "Unknown ingest error"
+      });
+      await prisma.syncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          status: SyncRunStatus.FAILED,
+          latestHistoryId,
+          pagesProcessed: pageCount,
+          processedCount: processed,
+          duplicateCount: duplicates,
+          errorMessage: error instanceof Error ? error.message : "Unknown ingest error",
+          notesJson: buildRunNotes(notes, {
+            requestedPageOffset: pageOffset ?? 0,
+            startPageToken: startPageToken ?? null,
+            nextPageToken,
+            usedIncrementalSync
+          }),
+          completedAt: new Date()
+        }
       });
       throw error;
     }
@@ -88,9 +155,16 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false, pa
     usedIncrementalSync = false;
     logger.warn("Gmail history expired, falling back to full mailbox sync", {
       existingHistoryId: existingAccount?.historyId ?? null,
-      pageOffset: pageOffset ?? 0
+      pageOffset: pageOffset ?? 0,
+      startPageToken: startPageToken ?? null
     });
-    await processPages(fetchEmailsInPages(client.gmail, { maxPages, pageOffset }));
+    await processPages(
+      fetchEmailsInPages(client.gmail, {
+        maxPages,
+        pageOffset: startPageToken ? 0 : pageOffset,
+        startPageToken
+      })
+    );
   }
 
   await prisma.gmailAccount.update({
@@ -102,16 +176,57 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false, pa
   });
 
   const modeLabel = usedIncrementalSync ? "incremental history sync" : "full mailbox sync";
+  const resolvedMode = modeOverride ?? (usedIncrementalSync ? SyncRunMode.INCREMENTAL : SyncRunMode.FULL);
+  syncRun = await prisma.syncRun.update({
+    where: { id: syncRun.id },
+    data: {
+      mode: resolvedMode,
+      status: SyncRunStatus.SUCCEEDED,
+      latestHistoryId,
+      pagesProcessed: pageCount,
+      processedCount: processed,
+      duplicateCount: duplicates,
+      notesJson: buildRunNotes(notes, {
+        requestedPageOffset: pageOffset ?? 0,
+        startPageToken: startPageToken ?? null,
+        nextPageToken,
+        usedIncrementalSync
+      }),
+      completedAt: new Date()
+    }
+  });
   logger.info("Ingest completed", {
     mode: modeLabel,
     processed,
     duplicates,
     pageCount,
-    pageOffset: pageOffset ?? 0
+    pageOffset: pageOffset ?? 0,
+    nextPageToken
   });
   console.log(
-    `Ingest complete via ${modeLabel}. New emails: ${processed}. Duplicates skipped: ${duplicates}. Pages processed: ${pageCount}. Page offset: ${pageOffset ?? 0}.`
+    `Ingest complete via ${modeLabel}. New emails: ${processed}. Duplicates skipped: ${duplicates}. Pages processed: ${pageCount}. Page offset: ${pageOffset ?? 0}. Next token: ${nextPageToken ?? "none"}.`
   );
+  return {
+    processed,
+    duplicates,
+    pageCount,
+    pageOffset: pageOffset ?? 0,
+    latestHistoryId,
+    nextPageToken,
+    usedIncrementalSync,
+    mode: resolvedMode,
+    syncRunId: syncRun.id
+  };
+}
+
+function buildRunNotes(
+  notes: Record<string, unknown> | undefined,
+  extras: Record<string, unknown>
+): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify({
+    ...(notes ?? {}),
+    ...extras
+  })) as Prisma.InputJsonValue;
 }
 
 async function runWorkerLoop(maxPages?: number, forceFullSync = false, pageOffset?: number) {
@@ -135,12 +250,14 @@ if (require.main === module) {
   const maxPages = maxPagesFlag ? Number(maxPagesFlag.split("=")[1]) : undefined;
   const pageOffsetFlag = process.argv.find((arg) => arg.startsWith("--page-offset="));
   const pageOffset = pageOffsetFlag ? Number(pageOffsetFlag.split("=")[1]) : undefined;
+  const pageTokenFlag = process.argv.find((arg) => arg.startsWith("--page-token="));
+  const startPageToken = pageTokenFlag ? pageTokenFlag.split("=")[1] : undefined;
   const loop = process.argv.includes("--loop");
   const forceFullSync = process.argv.includes("--full-sync");
 
   const runner = loop
     ? runWorkerLoop(maxPages, forceFullSync, pageOffset)
-    : runIngestOnce(maxPages, forceFullSync, pageOffset);
+    : runIngestOnce(maxPages, forceFullSync, pageOffset, undefined, undefined, startPageToken);
   runner
     .catch((error) => {
       console.error(error);

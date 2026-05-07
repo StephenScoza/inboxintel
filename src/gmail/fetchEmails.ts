@@ -3,6 +3,7 @@ import { config } from "../config";
 
 export interface GmailMessagePage {
   historyId?: string;
+  pageToken?: string;
   nextPageToken?: string;
   messages: gmail_v1.Schema$Message[];
 }
@@ -12,6 +13,7 @@ interface FetchOptions {
   pageOffset?: number;
   pageSize?: number;
   query?: string;
+  startPageToken?: string;
 }
 
 export class GmailHistoryExpiredError extends Error {
@@ -40,11 +42,12 @@ export async function *fetchEmailsInPages(
 ): AsyncGenerator<GmailMessagePage> {
   const pageSize = options.pageSize ?? config.gmailPageSize;
   const pageOffset = Math.max(0, options.pageOffset ?? 0);
-  let pageToken: string | undefined;
+  let pageToken = options.startPageToken;
   let scannedPageCount = 0;
   let yieldedPageCount = 0;
 
   do {
+    const currentPageToken = pageToken;
     const listResponse = await gmail.users.messages.list({
       userId: "me",
       maxResults: pageSize,
@@ -69,6 +72,7 @@ export async function *fetchEmailsInPages(
 
     if (scannedPageCount >= pageOffset) {
       yield {
+        pageToken: currentPageToken,
         nextPageToken: listResponse.data.nextPageToken ?? undefined,
         messages: fullMessages
       };
@@ -87,11 +91,12 @@ export async function *fetchHistoryInPages(
 ): AsyncGenerator<GmailMessagePage> {
   const pageSize = options.pageSize ?? config.gmailPageSize;
   const pageOffset = Math.max(0, options.pageOffset ?? 0);
-  let pageToken: string | undefined;
+  let pageToken = options.startPageToken;
   let scannedPageCount = 0;
   let yieldedPageCount = 0;
 
   do {
+    const currentPageToken = pageToken;
     let historyResponse;
 
     try {
@@ -133,6 +138,7 @@ export async function *fetchHistoryInPages(
     if (scannedPageCount >= pageOffset) {
       yield {
         historyId: historyResponse.data.historyId ?? undefined,
+        pageToken: currentPageToken,
         nextPageToken: historyResponse.data.nextPageToken ?? undefined,
         messages
       };

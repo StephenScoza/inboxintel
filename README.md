@@ -125,6 +125,14 @@ Run a one-time ingest:
 docker compose exec app npm run ingest
 ```
 
+Run a chunked historical backfill:
+
+```bash
+docker compose exec app npm run backfill -- --start-offset=100 --batch-pages=20 --batches=5
+```
+
+This processes older Gmail pages in deterministic chunks without modifying Gmail. The first batch can bootstrap from a page offset, and later batches chain Gmail `nextPageToken` values automatically so we do not keep rescanning the newest pages. Each backfill batch is recorded in the local sync-run ledger so you can track coverage growth, duplicates, and operational health over time.
+
 The worker service is already configured in Docker Compose and will start when you run `docker compose up --build`.
 
 You can also start or restart it explicitly:
@@ -134,6 +142,8 @@ docker compose up -d worker
 ```
 
 The worker periodically fetches Gmail messages in pages, stores new emails, classifies them, updates subscriptions, and writes alerts.
+
+Every ingest, backfill, and recovery run is persisted in Postgres as a sync run, which is useful when you start processing a much larger portion of the inbox.
 
 If you improve the deterministic rules and want to re-run them against emails already stored in Postgres without calling Gmail again:
 
@@ -158,6 +168,7 @@ Available routes:
 - `/emails/:id`
 - `/senders`
 - `/mailing-lists`
+- `/sync-runs`
 - `/taxonomy-review`
 - `/subscriptions`
 - `/money-leaks`
