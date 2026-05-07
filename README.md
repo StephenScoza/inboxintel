@@ -106,6 +106,12 @@ Run the OAuth helper inside the app container:
 docker compose exec app npm run gmail:auth
 ```
 
+List the Gmail token files currently available locally:
+
+```bash
+docker compose exec app npm run gmail:accounts
+```
+
 What happens:
 
 1. InboxIntel prints a Google consent URL.
@@ -116,6 +122,14 @@ What happens:
 6. InboxIntel stores the token JSON in the local `tokens/` directory.
 
 `tokens/` is intentionally gitignored.
+
+If you later connect multiple Gmail accounts, you can target one explicitly during readonly runs:
+
+```bash
+docker compose exec app npm run ingest -- --account=you@example.com --max-pages=5
+docker compose exec app npm run backfill -- --account=you@example.com --start-offset=auto --batch-pages=20 --batches=5
+docker compose exec app npm run recover:parse-issues -- --account=you@example.com
+```
 
 ## 7. Ingest emails
 
@@ -144,6 +158,8 @@ docker compose up -d worker
 The worker periodically fetches Gmail messages in pages, stores new emails, classifies them, updates subscriptions, and writes alerts.
 
 Every ingest, backfill, and recovery run is persisted in Postgres as a sync run, which is useful when you start processing a much larger portion of the inbox.
+
+For future multi-Gmail setups, you can also set `GMAIL_ACCOUNT_EMAIL=` in your environment to choose a default token when more than one Gmail account is connected locally.
 
 If you improve the deterministic rules and want to re-run them against emails already stored in Postgres without calling Gmail again:
 

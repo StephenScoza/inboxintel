@@ -2,22 +2,40 @@ import fs from "fs/promises";
 import path from "path";
 import { google } from "googleapis";
 import { config } from "../config";
-import { createOAuthClient, loadTokenFromDisk } from "./auth";
+import { createOAuthClient, listTokenAccounts, loadTokenFromDisk } from "./auth";
 
-async function findTokenFile(): Promise<string> {
-  await fs.mkdir(config.tokensDir, { recursive: true });
-  const entries = await fs.readdir(config.tokensDir);
-  const tokenFiles = entries.filter((entry) => entry.endsWith(".json"));
+interface AuthorizedClientOptions {
+  accountEmail?: string;
+}
 
-  if (tokenFiles.length === 0) {
+async function findTokenFile(accountEmail?: string): Promise<string> {
+  const requestedEmail = (accountEmail ?? config.gmailAccountEmail).trim().toLowerCase();
+  const tokenAccounts = await listTokenAccounts();
+
+  if (tokenAccounts.length === 0) {
     throw new Error("No Gmail token found. Run `npm run gmail:auth` first.");
   }
 
-  return path.join(config.tokensDir, tokenFiles[0]);
+  if (requestedEmail) {
+    const matched = tokenAccounts.find((entry) => entry.email.toLowerCase() === requestedEmail);
+    if (!matched) {
+      throw new Error(`No Gmail token found for ${requestedEmail}. Run \`npm run gmail:auth\` for that account first.`);
+    }
+
+    return matched.tokenPath;
+  }
+
+  if (tokenAccounts.length > 1) {
+    throw new Error(
+      `Multiple Gmail token files found. Set GMAIL_ACCOUNT_EMAIL or pass --account=<email>. Available: ${tokenAccounts.map((entry) => entry.email).join(", ")}`
+    );
+  }
+
+  return tokenAccounts[0].tokenPath;
 }
 
-export async function getAuthorizedGmailClient() {
-  const tokenPath = await findTokenFile();
+export async function getAuthorizedGmailClient(options: AuthorizedClientOptions = {}) {
+  const tokenPath = await findTokenFile(options.accountEmail);
   const oauthClient = createOAuthClient();
   const token = await loadTokenFromDisk(tokenPath);
   oauthClient.setCredentials(token);
@@ -38,4 +56,3 @@ export async function getAuthorizedGmailClient() {
     historyId: profile.data.historyId ?? null
   };
 }
-

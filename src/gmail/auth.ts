@@ -36,6 +36,19 @@ export async function loadTokenFromDisk(tokenPath: string) {
   return JSON.parse(raw);
 }
 
+export async function listTokenAccounts(): Promise<Array<{ email: string; tokenPath: string }>> {
+  await fs.mkdir(config.tokensDir, { recursive: true });
+  const entries = await fs.readdir(config.tokensDir);
+
+  return entries
+    .filter((entry) => entry.endsWith(".json"))
+    .map((entry) => ({
+      email: entry.replace(/\.json$/i, ""),
+      tokenPath: path.join(config.tokensDir, entry)
+    }))
+    .sort((left, right) => left.email.localeCompare(right.email));
+}
+
 async function exchangeCodeForToken(code: string) {
   const oauthClient = createOAuthClient();
   const tokenResponse = await oauthClient.getToken(code);
@@ -88,8 +101,22 @@ export async function runOAuthFlow(): Promise<void> {
   }
 }
 
+export async function runListAccounts(): Promise<void> {
+  const accounts = await listTokenAccounts();
+
+  if (accounts.length === 0) {
+    console.log("No Gmail token files found.");
+    return;
+  }
+
+  for (const account of accounts) {
+    console.log(`${account.email} -> ${account.tokenPath}`);
+  }
+}
+
 if (require.main === module) {
-  runOAuthFlow().catch((error) => {
+  const runner = process.argv.includes("--list") ? runListAccounts() : runOAuthFlow();
+  runner.catch((error) => {
     console.error(error);
     process.exit(1);
   });

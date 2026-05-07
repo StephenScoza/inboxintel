@@ -33,9 +33,10 @@ export async function runIngestOnce(
   pageOffset?: number,
   modeOverride?: SyncRunMode,
   notes?: Record<string, unknown>,
-  startPageToken?: string
+  startPageToken?: string,
+  accountEmail?: string
 ): Promise<IngestRunResult> {
-  const client = await getAuthorizedGmailClient();
+  const client = await getAuthorizedGmailClient({ accountEmail });
   const existingAccount = await prisma.gmailAccount.findUnique({
     where: { email: client.emailAddress }
   });
@@ -229,10 +230,10 @@ function buildRunNotes(
   })) as Prisma.InputJsonValue;
 }
 
-async function runWorkerLoop(maxPages?: number, forceFullSync = false, pageOffset?: number) {
+async function runWorkerLoop(maxPages?: number, forceFullSync = false, pageOffset?: number, accountEmail?: string) {
   while (true) {
     try {
-      await runIngestOnce(maxPages, forceFullSync, pageOffset);
+      await runIngestOnce(maxPages, forceFullSync, pageOffset, undefined, undefined, undefined, accountEmail);
     } catch (error) {
       logger.error("Worker iteration failed", {
         error: error instanceof Error ? error.message : "Unknown worker error"
@@ -252,12 +253,14 @@ if (require.main === module) {
   const pageOffset = pageOffsetFlag ? Number(pageOffsetFlag.split("=")[1]) : undefined;
   const pageTokenFlag = process.argv.find((arg) => arg.startsWith("--page-token="));
   const startPageToken = pageTokenFlag ? pageTokenFlag.split("=")[1] : undefined;
+  const accountFlag = process.argv.find((arg) => arg.startsWith("--account="));
+  const accountEmail = accountFlag ? accountFlag.split("=")[1] : undefined;
   const loop = process.argv.includes("--loop");
   const forceFullSync = process.argv.includes("--full-sync");
 
   const runner = loop
-    ? runWorkerLoop(maxPages, forceFullSync, pageOffset)
-    : runIngestOnce(maxPages, forceFullSync, pageOffset, undefined, undefined, startPageToken);
+    ? runWorkerLoop(maxPages, forceFullSync, pageOffset, accountEmail)
+    : runIngestOnce(maxPages, forceFullSync, pageOffset, undefined, undefined, startPageToken, accountEmail);
   runner
     .catch((error) => {
       console.error(error);

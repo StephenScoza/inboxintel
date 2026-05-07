@@ -11,6 +11,7 @@ interface BackfillOptions {
   pauseMs: number;
   startToken?: string;
   offsetPaddingPages: number;
+  accountEmail?: string;
 }
 
 function parseNumberFlag(name: string, fallback: number): number {
@@ -102,7 +103,8 @@ export async function runBackfill(options: BackfillOptions) {
         offsetPaddingPages: options.offsetPaddingPages,
         chainedByPageToken: Boolean(continuationToken)
       },
-      continuationToken
+      continuationToken,
+      options.accountEmail
     );
 
     totalProcessed += result.processed;
@@ -147,6 +149,8 @@ if (require.main === module) {
   const offsetPaddingPages = Math.max(0, parseNumberFlag("offset-padding-pages", 20));
   const startTokenFlag = process.argv.find((arg) => arg.startsWith("--start-token="));
   const startToken = startTokenFlag ? startTokenFlag.split("=")[1] : undefined;
+  const accountFlag = process.argv.find((arg) => arg.startsWith("--account="));
+  const accountEmail = accountFlag ? accountFlag.split("=")[1] : undefined;
 
   runBackfill({
     startOffset,
@@ -154,7 +158,8 @@ if (require.main === module) {
     batches,
     pauseMs,
     startToken,
-    offsetPaddingPages
+    offsetPaddingPages,
+    accountEmail
   })
     .catch((error) => {
       console.error(error);

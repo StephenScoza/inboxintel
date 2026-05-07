@@ -13,6 +13,7 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "gmail:auth": "tsx src/gmail/auth.ts",
+    "gmail:accounts": "tsx src/gmail/auth.ts --list",
     "ingest": "tsx src/jobs/ingestGmail.ts",
     "backfill": "tsx src/jobs/backfillGmail.ts",
     "worker": "tsx src/jobs/ingestGmail.ts --loop",

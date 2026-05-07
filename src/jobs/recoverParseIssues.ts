@@ -292,8 +292,8 @@ async function recoverStoredEmailFromMessage(
   };
 }
 
-export async function runRecoverParseIssues(limit?: number) {
-  const client = await getAuthorizedGmailClient();
+export async function runRecoverParseIssues(limit?: number, accountEmail?: string) {
+  const client = await getAuthorizedGmailClient({ accountEmail });
   const account = await prisma.gmailAccount.findUnique({
     where: { email: client.emailAddress }
   });
@@ -392,8 +392,10 @@ export async function runRecoverParseIssues(limit?: number) {
 if (require.main === module) {
   const limitFlag = process.argv.find((arg) => arg.startsWith("--limit="));
   const limit = limitFlag ? Number(limitFlag.split("=")[1]) : undefined;
+  const accountFlag = process.argv.find((arg) => arg.startsWith("--account="));
+  const accountEmail = accountFlag ? accountFlag.split("=")[1] : undefined;
 
-  runRecoverParseIssues(limit)
+  runRecoverParseIssues(limit, accountEmail)
     .catch((error) => {
       console.error(error);
       process.exit(1);

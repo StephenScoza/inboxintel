@@ -25,6 +25,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: parseNumber(process.env.PORT, 3217),
   databaseUrl: requireEnv("DATABASE_URL"),
+  gmailAccountEmail: process.env.GMAIL_ACCOUNT_EMAIL ?? "",
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3217/oauth2callback",
