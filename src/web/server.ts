@@ -1764,8 +1764,32 @@ export function createWebServer() {
     );
   });
 
-  app.get("/taxonomy-review", async (_req, res) => {
+  app.get("/taxonomy-review", async (req, res) => {
+    const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
+    const windowDays = Math.max(0, Math.min(365, Number(req.query.windowDays) || 0));
+    const cutoff = windowDays > 0
+      ? new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    const gmailAccounts = await prisma.gmailAccount.findMany({
+      orderBy: {
+        email: "asc"
+      },
+      select: {
+        id: true,
+        email: true
+      }
+    });
+
+    const selectedAccount = gmailAccounts.find((account) => account.id === accountId) ?? null;
+
     const classifications = await prisma.classification.findMany({
+      where: {
+        email: {
+          ...(accountId ? { gmailAccountId: accountId } : {}),
+          ...(cutoff ? { receivedAt: { gte: cutoff } } : {})
+        }
+      },
       include: {
         email: {
           select: {
@@ -1773,7 +1797,12 @@ export function createWebServer() {
             subject: true,
             senderEmail: true,
             senderDomain: true,
-            receivedAt: true
+            receivedAt: true,
+            gmailAccount: {
+              select: {
+                email: true
+              }
+            }
           }
         }
       },
@@ -1788,6 +1817,7 @@ export function createWebServer() {
       subject: string | null;
       senderEmail: string | null;
       senderDomain: string | null;
+      gmailAccountEmail: string | null;
       category: Category;
       confidence: number;
       urgencyScore: number;
@@ -1811,6 +1841,7 @@ export function createWebServer() {
           subject: string | null;
           senderEmail: string | null;
           senderDomain: string | null;
+          gmailAccountEmail: string | null;
           reasons: string[];
           confidence: number;
         }>;
@@ -1844,6 +1875,7 @@ export function createWebServer() {
           subject: classification.email.subject,
           senderEmail: classification.email.senderEmail,
           senderDomain: classification.email.senderDomain,
+          gmailAccountEmail: classification.email.gmailAccount?.email ?? null,
           reasons: classification.reasons.slice(0, 3),
           confidence: classification.confidence
         });
@@ -1896,6 +1928,7 @@ export function createWebServer() {
           subject: classification.email.subject,
           senderEmail: classification.email.senderEmail,
           senderDomain: classification.email.senderDomain,
+          gmailAccountEmail: classification.email.gmailAccount?.email ?? null,
           category: classification.category,
           confidence: classification.confidence,
           urgencyScore: classification.urgencyScore,
@@ -2057,6 +2090,7 @@ export function createWebServer() {
         (entry) => `<tr>
           <td><a href="/emails/${entry.emailId}">${escapeHtml(entry.subject ?? "(no subject)")}</a></td>
           <td>${escapeHtml(entry.senderEmail ?? entry.senderDomain ?? "unknown")}</td>
+          <td>${escapeHtml(entry.gmailAccountEmail ?? "n/a")}</td>
           <td>${renderCategoryPill(entry.category)}</td>
           <td>${entry.confidence}</td>
           <td>${entry.urgencyScore}</td>
@@ -2072,6 +2106,7 @@ export function createWebServer() {
         (entry) => `<tr>
           <td><a href="/emails/${entry.emailId}">${escapeHtml(entry.subject ?? "(no subject)")}</a></td>
           <td>${escapeHtml(entry.senderEmail ?? entry.senderDomain ?? "unknown")}</td>
+          <td>${escapeHtml(entry.gmailAccountEmail ?? "n/a")}</td>
           <td>${entry.confidence}</td>
           <td>${entry.opportunityScore}</td>
           <td><span class="muted">${escapeHtml(entry.suspicionReasons.join(" | "))}</span><br/>${escapeHtml(entry.reasons.join(" | "))}</td>
@@ -2148,11 +2183,36 @@ export function createWebServer() {
     const transactionalMismatchCount = suspiciousReviews.filter((entry) =>
       entry.suspicionReasons.includes("Transactional-style email in promo/newsletter bucket")
     ).length;
+    const scopedSubtitleParts = [
+      selectedAccount ? `Account: ${selectedAccount.email}` : "Account: all tracked Gmail accounts",
+      cutoff ? `Window: last ${windowDays} day${windowDays === 1 ? "" : "s"}` : "Window: all time"
+    ];
 
     res.send(
       renderPage(
         "Taxonomy Review",
         `${renderHero("Taxonomy review", "Audit every category as a system. See where confidence is weak, which buckets carry the most edge cases, and inspect real examples with the rule reasons that put them there.")}
+        <form method="get">
+          <select name="accountId">
+            <option value="">All Gmail accounts</option>
+            ${gmailAccounts
+              .map((account) => `<option value="${account.id}" ${account.id === accountId ? "selected" : ""}>${escapeHtml(account.email)}</option>`)
+              .join("")}
+          </select>
+          <select name="windowDays">
+            ${[
+              { value: 0, label: "All time" },
+              { value: 7, label: "Last 7 days" },
+              { value: 14, label: "Last 14 days" },
+              { value: 30, label: "Last 30 days" },
+              { value: 90, label: "Last 90 days" }
+            ]
+              .map((option) => `<option value="${option.value}" ${option.value === windowDays ? "selected" : ""}>${option.label}</option>`)
+              .join("")}
+          </select>
+          <button type="submit">Update Scope</button>
+        </form>
+        <p class="muted">${escapeHtml(scopedSubtitleParts.join(" · "))}</p>
         <section class="summary-grid">
           <div class="summary-card"><div class="summary-label">Classified Emails</div><div class="summary-value">${totalClassified}</div></div>
           <div class="summary-card"><div class="summary-label">Taxonomy Buckets</div><div class="summary-value">${Object.values(Category).length}</div></div>
@@ -2172,8 +2232,8 @@ export function createWebServer() {
           <section>
             <h3 class="section-title">Unknown emails to classify next</h3>
             <table>
-              <thead><tr><th>Email</th><th>Sender</th><th>Conf</th><th>Opportunity</th><th>Why unknown</th></tr></thead>
-              <tbody>${unknownRows || `<tr><td colspan="5">${renderEmptyState("No unknown emails are currently flagged.")}</td></tr>`}</tbody>
+              <thead><tr><th>Email</th><th>Sender</th><th>Account</th><th>Conf</th><th>Opportunity</th><th>Why unknown</th></tr></thead>
+              <tbody>${unknownRows || `<tr><td colspan="6">${renderEmptyState("No unknown emails are currently flagged.")}</td></tr>`}</tbody>
             </table>
           </section>
           <section>
@@ -2186,8 +2246,8 @@ export function createWebServer() {
           <section>
             <h3 class="section-title">Flagged emails to review next</h3>
             <table>
-              <thead><tr><th>Email</th><th>Sender</th><th>Category</th><th>Conf</th><th>Urgency</th><th>Opportunity</th><th>Review Score</th><th>Why flagged</th></tr></thead>
-              <tbody>${suspiciousRows || `<tr><td colspan="8">${renderEmptyState("No suspicious emails are currently flagged.")}</td></tr>`}</tbody>
+              <thead><tr><th>Email</th><th>Sender</th><th>Account</th><th>Category</th><th>Conf</th><th>Urgency</th><th>Opportunity</th><th>Review Score</th><th>Why flagged</th></tr></thead>
+              <tbody>${suspiciousRows || `<tr><td colspan="9">${renderEmptyState("No suspicious emails are currently flagged.")}</td></tr>`}</tbody>
             </table>
           </section>
           <section>
