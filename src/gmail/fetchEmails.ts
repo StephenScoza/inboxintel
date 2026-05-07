@@ -21,7 +21,7 @@ export class GmailHistoryExpiredError extends Error {
   }
 }
 
-async function fetchFullMessage(
+export async function fetchMessageById(
   gmail: gmail_v1.Gmail,
   messageId: string
 ): Promise<gmail_v1.Schema$Message | null> {
@@ -61,7 +61,7 @@ export async function *fetchEmailsInPages(
         continue;
       }
 
-      const fullMessage = await fetchFullMessage(gmail, messageRef.id);
+      const fullMessage = await fetchMessageById(gmail, messageRef.id);
       if (fullMessage) {
         fullMessages.push(fullMessage);
       }
@@ -124,7 +124,7 @@ export async function *fetchHistoryInPages(
 
     const messages: gmail_v1.Schema$Message[] = [];
     for (const messageId of messageIds) {
-      const fullMessage = await fetchFullMessage(gmail, messageId);
+      const fullMessage = await fetchMessageById(gmail, messageId);
       if (fullMessage) {
         messages.push(fullMessage);
       }

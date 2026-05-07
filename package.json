@@ -15,7 +15,8 @@
     "gmail:auth": "tsx src/gmail/auth.ts",
     "ingest": "tsx src/jobs/ingestGmail.ts",
     "worker": "tsx src/jobs/ingestGmail.ts --loop",
-    "reprocess": "tsx src/jobs/reprocessEmails.ts"
+    "reprocess": "tsx src/jobs/reprocessEmails.ts",
+    "recover:parse-issues": "tsx src/jobs/recoverParseIssues.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.8.2",
