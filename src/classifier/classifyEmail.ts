@@ -150,7 +150,8 @@ function isProductNewsletterDomain(senderDomain: string | null): boolean {
     "onedrive.com",
     "peacocktv.com",
     "umusic-online.com",
-    "nikeshoebot.com"
+    "nikeshoebot.com",
+    "tubitv.com"
   ]
     .some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
@@ -176,6 +177,7 @@ function isFinancialDomain(senderDomain: string | null): boolean {
     "creditkarma.com",
     "creditwise.capitalone.com",
     "experian.com",
+    "earnin.com",
     "paypal.com",
     "venmo.com",
     "zellepay.com"
@@ -258,6 +260,9 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "snipesusa.com",
     "topcashback.com",
     "panerabread.com",
+    "starbucks.com",
+    "simon.com",
+    "thecheesecakefactory.com",
     "whiteowlcigar.com",
     "vitacoco.com",
     "vitacost.com",
@@ -273,9 +278,11 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "umusic-online.com",
     "taylorswift.com",
     "ebay.com",
+    "alias.org",
     "travisscott.com",
     "corteiz.com",
-    "libertycannabis.com"
+    "libertycannabis.com",
+    "instacartemail.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -291,7 +298,8 @@ function isTravelDomain(senderDomain: string | null): boolean {
     "vfsevisa.com",
     "aaa-cluballiance.com",
     "royalcaribbean.com",
-    "royalcaribbeanmarketing.com"
+    "royalcaribbeanmarketing.com",
+    "spirit-airlines.com"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -851,6 +859,9 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
         "credit score",
         "credit scores",
         "credit limit",
+        "insurance",
+        "life insurance",
+        "term life insurance",
         "checking",
         "savings",
         "cash back",
@@ -901,8 +912,13 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     ]);
   const likelyMarketplaceFallback =
     input.senderDomain !== null &&
-    (input.senderDomain === "members.ebay.com" || input.senderDomain.endsWith(".members.ebay.com")) &&
-    hasAnyKeyword(combinedText, ["sent a message", "item", "size", "brand new", "in box"]);
+    (
+      input.senderDomain === "members.ebay.com" ||
+      input.senderDomain.endsWith(".members.ebay.com") ||
+      input.senderDomain === "alias.org" ||
+      input.senderDomain.endsWith(".alias.org")
+    ) &&
+    hasAnyKeyword(combinedText, ["sent a message", "item", "size", "brand new", "in box", "sold", "confirm order"]);
   const closestDate = detectClosestDate(input.dates);
   const likelyProductDomainFallback =
     isProductNewsletterDomain(input.senderDomain) &&

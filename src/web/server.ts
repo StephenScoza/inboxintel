@@ -420,6 +420,7 @@ function renderPage(title: string, body: string): string {
           <a href="/senders">Senders</a>
           <a href="/mailing-lists">Mailing Lists</a>
           <a href="/taxonomy-review">Taxonomy Review</a>
+          <a href="/parse-issues">Parse Issues</a>
           <a href="/subscriptions">Subscriptions</a>
           <a href="/money-leaks">Money Leaks</a>
           <a href="/analytics">Analytics</a>
@@ -1778,7 +1779,7 @@ export function createWebServer() {
       orderBy: {
         updatedAt: "desc"
       },
-      take: 2000
+      take: 4000
     });
 
     const suspiciousReviews: Array<{
@@ -1861,6 +1862,11 @@ export function createWebServer() {
       if (classification.confidence < 72) {
         suspicionScore += 35 + (72 - classification.confidence);
         suspicionReasons.push(`Low confidence ${classification.confidence}`);
+      }
+
+      if (classification.category === Category.UNKNOWN) {
+        suspicionScore += 28;
+        suspicionReasons.push("Unknown bucket needs taxonomy decision");
       }
 
       if (likelyMarketing && ["FINANCE", "LIFE", "WORK"].includes(family)) {
@@ -1986,6 +1992,65 @@ export function createWebServer() {
       })
       .slice(0, 30);
 
+    const unknownQueue = suspiciousReviews
+      .filter((entry) => entry.category === Category.UNKNOWN)
+      .sort((left, right) => {
+        if (right.suspicionScore !== left.suspicionScore) {
+          return right.suspicionScore - left.suspicionScore;
+        }
+
+        return left.confidence - right.confidence;
+      })
+      .slice(0, 12);
+
+    const suspiciousClusterMap = new Map<string, {
+      senderLabel: string;
+      senderDomain: string | null;
+      category: Category;
+      count: number;
+      confidenceTotal: number;
+      suspicionTotal: number;
+      topReasons: Map<string, number>;
+      sampleEmailId: string;
+      sampleSubject: string | null;
+    }>();
+
+    for (const entry of suspiciousReviews) {
+      const senderLabel = entry.senderDomain ?? entry.senderEmail ?? "unknown";
+      const clusterKey = `${senderLabel}|${entry.category}`;
+      const current = suspiciousClusterMap.get(clusterKey) ?? {
+        senderLabel,
+        senderDomain: entry.senderDomain,
+        category: entry.category,
+        count: 0,
+        confidenceTotal: 0,
+        suspicionTotal: 0,
+        topReasons: new Map<string, number>(),
+        sampleEmailId: entry.emailId,
+        sampleSubject: entry.subject
+      };
+
+      current.count += 1;
+      current.confidenceTotal += entry.confidence;
+      current.suspicionTotal += entry.suspicionScore;
+      for (const reason of entry.suspicionReasons) {
+        current.topReasons.set(reason, (current.topReasons.get(reason) ?? 0) + 1);
+      }
+
+      suspiciousClusterMap.set(clusterKey, current);
+    }
+
+    const suspiciousClusters = Array.from(suspiciousClusterMap.values())
+      .filter((entry) => entry.count >= 2)
+      .sort((left, right) => {
+        if (right.count !== left.count) {
+          return right.count - left.count;
+        }
+
+        return right.suspicionTotal - left.suspicionTotal;
+      })
+      .slice(0, 12);
+
     const suspiciousRows = suspiciousQueue
       .map(
         (entry) => `<tr>
@@ -1999,6 +2064,39 @@ export function createWebServer() {
           <td><span class="muted">${escapeHtml(entry.suspicionReasons.join(" | "))}</span><br/>${escapeHtml(entry.reasons.join(" | "))}</td>
         </tr>`
       )
+      .join("");
+
+    const unknownRows = unknownQueue
+      .map(
+        (entry) => `<tr>
+          <td><a href="/emails/${entry.emailId}">${escapeHtml(entry.subject ?? "(no subject)")}</a></td>
+          <td>${escapeHtml(entry.senderEmail ?? entry.senderDomain ?? "unknown")}</td>
+          <td>${entry.confidence}</td>
+          <td>${entry.opportunityScore}</td>
+          <td><span class="muted">${escapeHtml(entry.suspicionReasons.join(" | "))}</span><br/>${escapeHtml(entry.reasons.join(" | "))}</td>
+        </tr>`
+      )
+      .join("");
+
+    const clusterRows = suspiciousClusters
+      .map((entry) => {
+        const avgConfidence = Math.round(entry.confidenceTotal / Math.max(entry.count, 1));
+        const topReasons = Array.from(entry.topReasons.entries())
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 3)
+          .map(([reason, count]) => `${reason} (${count})`)
+          .join(" | ");
+
+        return `<tr>
+          <td>${escapeHtml(entry.senderLabel)}</td>
+          <td>${renderCategoryPill(entry.category)}</td>
+          <td>${entry.count}</td>
+          <td>${avgConfidence}</td>
+          <td>${Math.round(entry.suspicionTotal / Math.max(entry.count, 1))}</td>
+          <td><a href="/emails/${entry.sampleEmailId}">${escapeHtml(entry.sampleSubject ?? "(no subject)")}</a></td>
+          <td>${escapeHtml(topReasons || "No repeated reason")}</td>
+        </tr>`;
+      })
       .join("");
 
     const suspiciousCategoryChart = renderHorizontalBarChart(
@@ -2016,6 +2114,40 @@ export function createWebServer() {
       }
     );
 
+    const suspiciousClusterChart = renderHorizontalBarChart(
+      suspiciousClusters.map((entry) => ({
+        label: `${entry.senderLabel} → ${entry.category.replaceAll("_", " ")}`,
+        value: entry.count
+      })),
+      {
+        valueFormatter: (value) => `${value} emails`
+      }
+    );
+
+    const unknownByDomainChart = renderHorizontalBarChart(
+      Array.from(
+        unknownQueue.reduce((map, entry) => {
+          const key = entry.senderDomain ?? entry.senderEmail ?? "unknown";
+          map.set(key, (map.get(key) ?? 0) + 1);
+          return map;
+        }, new Map<string, number>())
+      )
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value)
+        .slice(0, 10),
+      {
+        valueFormatter: (value) => `${value} unknown`
+      }
+    );
+
+    const unknownCount = suspiciousReviews.filter((entry) => entry.category === Category.UNKNOWN).length;
+    const marketingMismatchCount = suspiciousReviews.filter((entry) =>
+      entry.suspicionReasons.includes("Marketing-style email in non-marketing family")
+    ).length;
+    const transactionalMismatchCount = suspiciousReviews.filter((entry) =>
+      entry.suspicionReasons.includes("Transactional-style email in promo/newsletter bucket")
+    ).length;
+
     res.send(
       renderPage(
         "Taxonomy Review",
@@ -2026,11 +2158,30 @@ export function createWebServer() {
           <div class="summary-card"><div class="summary-label">Low Confidence</div><div class="summary-value">${lowConfidenceTotal}</div></div>
           <div class="summary-card"><div class="summary-label">High Urgency</div><div class="summary-value">${urgentTotal}</div></div>
           <div class="summary-card"><div class="summary-label">Review Queue</div><div class="summary-value">${suspiciousQueue.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Unknown Left</div><div class="summary-value">${unknownCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Marketing Mismatch</div><div class="summary-value">${marketingMismatchCount}</div></div>
+          <div class="summary-card"><div class="summary-label">Transactional Mismatch</div><div class="summary-value">${transactionalMismatchCount}</div></div>
         </section>
         <div class="grid">
           ${renderChartCard("Low-confidence hotspots", "Categories with the most emails scoring below 70 confidence are usually the best candidates for the next rule pass.", lowConfidenceChart)}
           ${renderChartCard("Average confidence by category", "A quick precision view across the whole taxonomy.", confidenceChart)}
           ${renderChartCard("Flagged review queue", "These are the categories currently surfacing the most suspicious classifications in the review queue below.", suspiciousCategoryChart)}
+          ${renderChartCard("Review clusters", "Repeated suspicious patterns are where a single rule change can clean up many emails at once.", suspiciousClusterChart)}
+          ${renderChartCard("Unknown cluster by sender", "The remaining unknown set is now small enough to treat like a focused backlog.", unknownByDomainChart)}
+          <section>
+            <h3 class="section-title">Unknown emails to classify next</h3>
+            <table>
+              <thead><tr><th>Email</th><th>Sender</th><th>Conf</th><th>Opportunity</th><th>Why unknown</th></tr></thead>
+              <tbody>${unknownRows || `<tr><td colspan="5">${renderEmptyState("No unknown emails are currently flagged.")}</td></tr>`}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3 class="section-title">Repeated suspicious clusters</h3>
+            <table>
+              <thead><tr><th>Sender</th><th>Current Category</th><th>Emails</th><th>Avg Conf</th><th>Avg Review Score</th><th>Sample</th><th>Why this cluster matters</th></tr></thead>
+              <tbody>${clusterRows || `<tr><td colspan="7">${renderEmptyState("No repeated suspicious clusters yet.")}</td></tr>`}</tbody>
+            </table>
+          </section>
           <section>
             <h3 class="section-title">Flagged emails to review next</h3>
             <table>
@@ -2043,6 +2194,102 @@ export function createWebServer() {
             <table>
               <thead><tr><th>Category</th><th>Family</th><th>Emails</th><th>Avg Confidence</th><th>Avg Urgency</th><th>Avg Opportunity</th><th>Low Conf</th><th>High Urgency</th><th>Samples</th></tr></thead>
               <tbody>${categoryRows}</tbody>
+            </table>
+          </section>
+        </div>`
+      )
+    );
+  });
+
+  app.get("/parse-issues", async (_req, res) => {
+    const parseIssues = await prisma.parseIssue.findMany({
+      include: {
+        email: true,
+        gmailAccount: true
+      },
+      orderBy: [
+        { resolvedAt: "asc" },
+        { lastSeenAt: "desc" }
+      ],
+      take: 250
+    });
+
+    const openIssues = parseIssues.filter((issue) => !issue.resolvedAt);
+    const resolvedIssues = parseIssues.filter((issue) => issue.resolvedAt);
+    const issueTypeChart = renderHorizontalBarChart(
+      Array.from(
+        openIssues.reduce((map, issue) => {
+          const key = `${issue.stage} · ${issue.issueType}`;
+          map.set(key, (map.get(key) ?? 0) + 1);
+          return map;
+        }, new Map<string, number>())
+      )
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value),
+      {
+        valueFormatter: (value) => `${value} open`
+      }
+    );
+
+    const senderDomainChart = renderHorizontalBarChart(
+      Array.from(
+        openIssues.reduce((map, issue) => {
+          const key = issue.email?.senderDomain ?? issue.email?.senderEmail ?? "unknown";
+          map.set(key, (map.get(key) ?? 0) + 1);
+          return map;
+        }, new Map<string, number>())
+      )
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value)
+        .slice(0, 12),
+      {
+        valueFormatter: (value) => `${value} open`
+      }
+    );
+
+    const rows = parseIssues
+      .map((issue) => {
+        const details = issue.detailsJson && typeof issue.detailsJson === "object"
+          ? JSON.stringify(issue.detailsJson)
+          : null;
+        const status = issue.resolvedAt ? "Resolved" : "Open";
+        const emailLabel = escapeHtml(issue.email?.subject ?? issue.gmailMessageId);
+        const emailLink = issue.emailId
+          ? `<a href="/emails/${issue.emailId}">${emailLabel}</a>`
+          : emailLabel;
+
+        return `<tr>
+          <td>${escapeHtml(status)}</td>
+          <td>${escapeHtml(issue.stage)}</td>
+          <td>${escapeHtml(issue.issueType)}</td>
+          <td>${escapeHtml(issue.severity)}</td>
+          <td>${emailLink}</td>
+          <td>${escapeHtml(issue.email?.senderEmail ?? issue.email?.senderDomain ?? "unknown")}</td>
+          <td>${issue.occurrenceCount}</td>
+          <td>${formatDate(issue.lastSeenAt)}</td>
+          <td>${escapeHtml(issue.summary)}${details ? `<br /><span class="muted">${escapeHtml(details)}</span>` : ""}</td>
+        </tr>`;
+      })
+      .join("");
+
+    res.send(
+      renderPage(
+        "Parse Issues",
+        `${renderHero("Parse issue ledger", "Track every email we could not store or parse perfectly. This turns parser drift and malformed payloads into a visible backlog we can steadily drive toward zero.")}
+        <section class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Tracked Issues</div><div class="summary-value">${parseIssues.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Open Issues</div><div class="summary-value">${openIssues.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Resolved</div><div class="summary-value">${resolvedIssues.length}</div></div>
+          <div class="summary-card"><div class="summary-label">Distinct Gmail Messages</div><div class="summary-value">${new Set(parseIssues.map((issue) => issue.gmailMessageId)).size}</div></div>
+        </section>
+        <div class="grid">
+          ${renderChartCard("Open parse issues by type", "Use this to see whether we are mostly losing links, classification payloads, or entire message fidelity.", issueTypeChart)}
+          ${renderChartCard("Open parse issues by sender", "Repeated issues from the same sender usually point to one parser edge case we can fix once.", senderDomainChart)}
+          <section>
+            <h3 class="section-title">Issue backlog</h3>
+            <table>
+              <thead><tr><th>Status</th><th>Stage</th><th>Issue Type</th><th>Severity</th><th>Email</th><th>Sender</th><th>Seen</th><th>Last Seen</th><th>Details</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="9">${renderEmptyState("No parse issues tracked yet.")}</td></tr>`}</tbody>
             </table>
           </section>
         </div>`

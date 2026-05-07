@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { ParseIssueSeverity, ParseIssueStage, ParseIssueType, Prisma } from "@prisma/client";
 import { shouldSuppressAlert } from "../alerts/policy";
 import { prisma } from "../db";
 import {
@@ -11,6 +11,7 @@ import { buildEmailIntelligence } from "../intelligence/buildEmailIntelligence";
 import { deriveVendorIdentity } from "../intelligence/vendorIdentity";
 import { sendDiscordAlert } from "../alerts/discord";
 import { logger } from "../utils/logger";
+import { recordParseIssue, resolveParseIssuesForMessage } from "../utils/parseIssues";
 import { sanitizeJsonValue } from "../utils/safeJson";
 
 function isPrismaInvalidArgError(error: unknown): boolean {
@@ -170,6 +171,7 @@ export async function runReprocess(limit?: number) {
     });
 
     try {
+      let usedClassificationFallback = false;
       try {
         await prisma.classification.upsert({
           where: {
@@ -193,11 +195,17 @@ export async function runReprocess(limit?: number) {
             signalsJson: sanitizeJsonValue(intelligence.classification.signals) as unknown as Prisma.InputJsonValue
           }
         });
+        await resolveParseIssuesForMessage({
+          gmailMessageId: email.gmailMessageId,
+          stage: ParseIssueStage.REPROCESS,
+          issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
+        });
       } catch (error) {
         if (!isPrismaInvalidArgError(error)) {
           throw error;
         }
 
+        usedClassificationFallback = true;
         logger.warn("Falling back to minimal classification storage during reprocess", {
           emailId: email.id,
           gmailMessageId: email.gmailMessageId
@@ -226,6 +234,24 @@ export async function runReprocess(limit?: number) {
         });
       }
 
+      if (usedClassificationFallback) {
+        await recordParseIssue({
+          emailId: email.id,
+          gmailAccountId: email.gmailAccountId,
+          gmailMessageId: email.gmailMessageId,
+          issueType: ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK,
+          stage: ParseIssueStage.REPROCESS,
+          severity: ParseIssueSeverity.WARN,
+          summary: "Classification required fallback storage during reprocess",
+          details: {
+            emailId: email.id,
+            category: intelligence.classification.category,
+            confidence: intelligence.classification.confidence
+          }
+        });
+      }
+
+      let usedPayloadFallback = false;
       try {
         await prisma.email.update({
           where: { id: email.id },
@@ -234,11 +260,17 @@ export async function runReprocess(limit?: number) {
             datesJson: sanitizeJsonValue(intelligence.dates) as unknown as Prisma.InputJsonValue
           }
         });
+        await resolveParseIssuesForMessage({
+          gmailMessageId: email.gmailMessageId,
+          stage: ParseIssueStage.REPROCESS,
+          issueTypes: [ParseIssueType.EXTRACTED_PAYLOAD_FALLBACK]
+        });
       } catch (error) {
         if (!isPrismaInvalidArgError(error)) {
           throw error;
         }
 
+        usedPayloadFallback = true;
         logger.warn("Falling back to minimal extracted payload storage during reprocess", {
           emailId: email.id,
           gmailMessageId: email.gmailMessageId
@@ -248,6 +280,22 @@ export async function runReprocess(limit?: number) {
           data: {
             amountsJson: Prisma.JsonNull,
             datesJson: Prisma.JsonNull
+          }
+        });
+      }
+
+      if (usedPayloadFallback) {
+        await recordParseIssue({
+          emailId: email.id,
+          gmailAccountId: email.gmailAccountId,
+          gmailMessageId: email.gmailMessageId,
+          issueType: ParseIssueType.EXTRACTED_PAYLOAD_FALLBACK,
+          stage: ParseIssueStage.REPROCESS,
+          severity: ParseIssueSeverity.WARN,
+          summary: "Amounts or dates required fallback storage during reprocess",
+          details: {
+            emailId: email.id,
+            category: intelligence.classification.category
           }
         });
       }
@@ -316,12 +364,30 @@ export async function runReprocess(limit?: number) {
       }
 
       updated += 1;
+      await resolveParseIssuesForMessage({
+        gmailMessageId: email.gmailMessageId,
+        stage: ParseIssueStage.REPROCESS,
+        issueTypes: [ParseIssueType.PROCESSING_FAILED]
+      });
     } catch (error) {
       failed += 1;
       logger.error("Failed to reprocess stored email", {
         emailId: email.id,
         gmailMessageId: email.gmailMessageId,
         error: error instanceof Error ? error.message : "Unknown error"
+      });
+      await recordParseIssue({
+        emailId: email.id,
+        gmailAccountId: email.gmailAccountId,
+        gmailMessageId: email.gmailMessageId,
+        issueType: ParseIssueType.PROCESSING_FAILED,
+        stage: ParseIssueStage.REPROCESS,
+        severity: ParseIssueSeverity.ERROR,
+        summary: "Stored email failed reprocess",
+        details: {
+          emailId: email.id,
+          error: error instanceof Error ? error.message : "Unknown error"
+        }
       });
     }
   }

@@ -309,6 +309,19 @@ const tests = [
     }
   },
   {
+    name: "classifies airline points promos as travel",
+    run() {
+      const result = evaluateEmail({
+        subject: "Stephen, want 400 Free Spirit points?",
+        plainTextBody: "Earn Free Spirit points for your next flight and travel farther with partner offers.",
+        senderDomain: "save.spirit-airlines.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.TRAVEL);
+    }
+  },
+  {
     name: "classifies tax product surveys as product or newsletter",
     run() {
       const result = evaluateEmail({
@@ -619,6 +632,19 @@ const tests = [
     }
   },
   {
+    name: "classifies streaming network updates as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Boarders is BACK",
+        plainTextBody: "Catch the latest on Tubi and stream your next watch tonight.",
+        senderDomain: "watch.tubitv.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "does not classify generic promo emails as product newsletter from footer policy text alone",
     run() {
       const result = evaluateEmail({
@@ -653,6 +679,19 @@ const tests = [
       });
 
       assert.equal(result.classification.category, Category.HEALTHCARE);
+    }
+  },
+  {
+    name: "classifies fintech insurance marketing as banking",
+    run() {
+      const result = evaluateEmail({
+        subject: "What if term life insurance didn’t cost a fortune?",
+        plainTextBody: "Explore term life insurance options and financial protection with SoFi.",
+        senderDomain: "m.sofi.org",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.BANKING);
     }
   },
   {
@@ -693,6 +732,44 @@ const tests = [
       });
 
       assert.notEqual(result.classification.category, Category.SUBSCRIPTION);
+      assert.equal(result.classification.category, Category.SHOPPING);
+    }
+  },
+  {
+    name: "classifies mall seasonal photo promos as retail promo",
+    run() {
+      const result = evaluateEmail({
+        subject: "Easter Bunny is on its way! Reserve your visit today.",
+        plainTextBody: "Reserve your visit today and plan your trip to the mall for seasonal photos.",
+        senderDomain: "email.simon.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "classifies restaurant rewards menu promos as retail promo",
+    run() {
+      const result = evaluateEmail({
+        subject: "ICYMI our new menu items are now available!",
+        plainTextBody: "Try our new menu items and rewards offers this week.",
+        senderDomain: "rewards.thecheesecakefactory.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "classifies marketplace sold confirmations as shopping",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your adidas Yeezy Slides 'Dark Onyx' Just Sold - Please Confirm Order #508123189",
+        plainTextBody: "Your item sold. Please confirm order details and shipping info.",
+        senderDomain: "alias.org"
+      });
+
       assert.equal(result.classification.category, Category.SHOPPING);
     }
   },

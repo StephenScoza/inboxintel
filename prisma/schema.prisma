@@ -51,6 +51,25 @@ enum SubscriptionStatus {
   UNKNOWN
 }
 
+enum ParseIssueType {
+  EMAIL_STORAGE_FALLBACK
+  CLASSIFICATION_STORAGE_FALLBACK
+  EXTRACTED_PAYLOAD_FALLBACK
+  LINK_SKIPPED
+  PROCESSING_FAILED
+}
+
+enum ParseIssueStage {
+  INGEST
+  REPROCESS
+}
+
+enum ParseIssueSeverity {
+  INFO
+  WARN
+  ERROR
+}
+
 model GmailAccount {
   id            String         @id @default(cuid())
   email         String         @unique
@@ -62,6 +81,7 @@ model GmailAccount {
   emails        Email[]
   subscriptions Subscription[]
   alerts        Alert[]
+  parseIssues   ParseIssue[]
 }
 
 model Email {
@@ -112,6 +132,7 @@ model Email {
   links            EmailLink[]
   classification   Classification?
   alerts           Alert[]
+  parseIssues      ParseIssue[]
 }
 
 model EmailLink {
@@ -189,4 +210,24 @@ model Alert {
   createdAt        DateTime    @default(now())
   email            Email       @relation(fields: [emailId], references: [id], onDelete: Cascade)
   gmailAccount     GmailAccount @relation(fields: [gmailAccountId], references: [id], onDelete: Cascade)
+}
+
+model ParseIssue {
+  id             String             @id @default(cuid())
+  emailId        String?
+  gmailAccountId String?
+  gmailMessageId String
+  issueType      ParseIssueType
+  stage          ParseIssueStage
+  severity       ParseIssueSeverity
+  summary        String
+  detailsJson    Json?
+  occurrenceCount Int               @default(1)
+  firstSeenAt    DateTime           @default(now())
+  lastSeenAt     DateTime           @updatedAt
+  resolvedAt     DateTime?
+  email          Email?             @relation(fields: [emailId], references: [id], onDelete: SetNull)
+  gmailAccount   GmailAccount?      @relation(fields: [gmailAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([gmailMessageId, issueType, stage])
 }

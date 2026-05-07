@@ -1,4 +1,4 @@
-import { AlertType, Category, Prisma } from "@prisma/client";
+import { AlertType, Category, ParseIssueSeverity, ParseIssueStage, ParseIssueType, Prisma } from "@prisma/client";
 import { gmail_v1 } from "googleapis";
 import { sendDiscordAlert } from "../alerts/discord";
 import { shouldSuppressAlert } from "../alerts/policy";
@@ -15,6 +15,7 @@ import { extractBody } from "../parser/extractBody";
 import { extractHeaders } from "../parser/extractHeaders";
 import { extractLinks } from "../parser/extractLinks";
 import { logger } from "../utils/logger";
+import { recordParseIssue, resolveParseIssuesForMessage } from "../utils/parseIssues";
 import { sanitizeJsonValue, sanitizeText } from "../utils/safeJson";
 
 function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | null {
@@ -285,6 +286,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   };
 
   let email;
+  let usedEmailFallback = false;
   try {
     email = await prisma.email.create({
       data: {
@@ -296,15 +298,34 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         classification: true
       }
     });
+    await resolveParseIssuesForMessage({
+      gmailMessageId: message.id,
+      stage: ParseIssueStage.INGEST,
+      issueTypes: [ParseIssueType.EMAIL_STORAGE_FALLBACK]
+    });
   } catch (error) {
     if (!isPrismaInvalidArgError(error)) {
       logger.error("Email create failed before fallback", {
         gmailMessageId: message.id,
         error: error instanceof Error ? error.message : "Unknown error"
       });
+      await recordParseIssue({
+        gmailAccountId: context.gmailAccountId,
+        gmailMessageId: message.id,
+        issueType: ParseIssueType.PROCESSING_FAILED,
+        stage: ParseIssueStage.INGEST,
+        severity: ParseIssueSeverity.ERROR,
+        summary: "Email storage failed before fallback",
+        details: {
+          sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
+          subject,
+          error: error instanceof Error ? error.message : "Unknown error"
+        }
+      });
       throw error;
     }
 
+    usedEmailFallback = true;
     logger.warn("Falling back to minimal email storage for Gmail message", {
       gmailMessageId: message.id,
       sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
@@ -323,6 +344,19 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
           gmailMessageId: message.id,
           error: fallbackError instanceof Error ? fallbackError.message : "Unknown error"
         });
+        await recordParseIssue({
+          gmailAccountId: context.gmailAccountId,
+          gmailMessageId: message.id,
+          issueType: ParseIssueType.PROCESSING_FAILED,
+          stage: ParseIssueStage.INGEST,
+          severity: ParseIssueSeverity.ERROR,
+          summary: "Minimal email fallback failed",
+          details: {
+            sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
+            subject,
+            error: fallbackError instanceof Error ? fallbackError.message : "Unknown error"
+          }
+        });
         throw fallbackError;
       }
 
@@ -339,12 +373,36 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     }
   }
 
+  if (usedEmailFallback) {
+    await recordParseIssue({
+      emailId: email.id,
+      gmailAccountId: context.gmailAccountId,
+      gmailMessageId: message.id,
+      issueType: ParseIssueType.EMAIL_STORAGE_FALLBACK,
+      stage: ParseIssueStage.INGEST,
+      severity: ParseIssueSeverity.WARN,
+      summary: "Email required fallback storage during ingest",
+      details: {
+        sender: senderMeta.senderEmail ?? senderMeta.senderRaw,
+        subject,
+        hasPlainTextBody: Boolean(plainTextBody),
+        hasHtmlBody: Boolean(htmlBody)
+      }
+    });
+  }
+
+  let usedClassificationFallback = false;
   try {
     await prisma.classification.create({
       data: {
         emailId: email.id,
         ...classificationData
       }
+    });
+    await resolveParseIssuesForMessage({
+      gmailMessageId: message.id,
+      stage: ParseIssueStage.INGEST,
+      issueTypes: [ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK]
     });
   } catch (error) {
     if (!isPrismaInvalidArgError(error)) {
@@ -353,9 +411,24 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         emailId: email.id,
         error: error instanceof Error ? error.message : "Unknown error"
       });
+      await recordParseIssue({
+        emailId: email.id,
+        gmailAccountId: context.gmailAccountId,
+        gmailMessageId: message.id,
+        issueType: ParseIssueType.PROCESSING_FAILED,
+        stage: ParseIssueStage.INGEST,
+        severity: ParseIssueSeverity.ERROR,
+        summary: "Classification storage failed",
+        details: {
+          emailId: email.id,
+          subject,
+          error: error instanceof Error ? error.message : "Unknown error"
+        }
+      });
       throw error;
     }
 
+    usedClassificationFallback = true;
     logger.warn("Falling back to minimal classification storage for Gmail message", {
       gmailMessageId: message.id,
       emailId: email.id
@@ -374,6 +447,24 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     email.classification = null;
   }
 
+  if (usedClassificationFallback) {
+    await recordParseIssue({
+      emailId: email.id,
+      gmailAccountId: context.gmailAccountId,
+      gmailMessageId: message.id,
+      issueType: ParseIssueType.CLASSIFICATION_STORAGE_FALLBACK,
+      stage: ParseIssueStage.INGEST,
+      severity: ParseIssueSeverity.WARN,
+      summary: "Classification required fallback storage during ingest",
+      details: {
+        emailId: email.id,
+        category: intelligence.classification.category,
+        confidence: intelligence.classification.confidence
+      }
+    });
+  }
+
+  let skippedLinkCount = 0;
   for (const link of links) {
     if (!canSafelyPersistLink(link.url)) {
       logger.warn("Skipping oversized email link", {
@@ -381,6 +472,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         emailId: email.id,
         urlLength: link.url?.length ?? 0
       });
+      skippedLinkCount += 1;
       continue;
     }
 
@@ -409,7 +501,30 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         emailId: email.id,
         url: link.url
       });
+      skippedLinkCount += 1;
     }
+  }
+
+  if (skippedLinkCount > 0) {
+    await recordParseIssue({
+      emailId: email.id,
+      gmailAccountId: context.gmailAccountId,
+      gmailMessageId: message.id,
+      issueType: ParseIssueType.LINK_SKIPPED,
+      stage: ParseIssueStage.INGEST,
+      severity: ParseIssueSeverity.WARN,
+      summary: "One or more links could not be persisted",
+      details: {
+        emailId: email.id,
+        skippedLinkCount
+      }
+    });
+  } else {
+    await resolveParseIssuesForMessage({
+      gmailMessageId: message.id,
+      stage: ParseIssueStage.INGEST,
+      issueTypes: [ParseIssueType.LINK_SKIPPED]
+    });
   }
 
   logger.info("Stored Gmail message", {
@@ -417,6 +532,11 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
     emailId: email.id,
     category: intelligence.classification.category,
     subject
+  });
+  await resolveParseIssuesForMessage({
+    gmailMessageId: message.id,
+    stage: ParseIssueStage.INGEST,
+    issueTypes: [ParseIssueType.PROCESSING_FAILED]
   });
 
   if (shouldTrackSubscription(intelligence.classification.category, intelligence.signals)) {
