@@ -90,7 +90,9 @@ export const KEYWORDS = {
     "financial aid",
     "registrar",
     "alumni",
-    "commencement"
+    "commencement",
+    "giving day",
+    "university"
   ],
   social: [
     "invitation",

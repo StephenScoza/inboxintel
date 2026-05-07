@@ -73,6 +73,14 @@ function isPrismaInvalidArgError(error: unknown): boolean {
   );
 }
 
+function isOversizedIndexError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("index row size");
+}
+
+function canSafelyPersistLink(url: string | null): boolean {
+  return typeof url === "string" && url.length <= 1800;
+}
+
 export async function processEmail(message: gmail_v1.Schema$Message, context: ProcessContext) {
   if (!message.id) {
     logger.warn("Skipping Gmail message without id");
@@ -367,6 +375,15 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
   }
 
   for (const link of links) {
+    if (!canSafelyPersistLink(link.url)) {
+      logger.warn("Skipping oversized email link", {
+        gmailMessageId: message.id,
+        emailId: email.id,
+        urlLength: link.url?.length ?? 0
+      });
+      continue;
+    }
+
     try {
       await prisma.emailLink.create({
         data: {
@@ -377,7 +394,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         }
       });
     } catch (error) {
-      if (!isPrismaInvalidArgError(error)) {
+      if (!isPrismaInvalidArgError(error) && !isOversizedIndexError(error)) {
         logger.error("Email link create failed", {
           gmailMessageId: message.id,
           emailId: email.id,
@@ -387,7 +404,7 @@ export async function processEmail(message: gmail_v1.Schema$Message, context: Pr
         throw error;
       }
 
-      logger.warn("Skipping malformed email link", {
+      logger.warn("Skipping malformed or oversized email link", {
         gmailMessageId: message.id,
         emailId: email.id,
         url: link.url

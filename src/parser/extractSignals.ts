@@ -145,7 +145,15 @@ export function extractSignals(input: ExtractSignalsInput): ExtractedSignals {
     subscription.length > 0 ||
     freeTrial.length > 0 ||
     renewal.length > 0 ||
-    containsAny(lower, ["cancel anytime", "monthly", "annual", "membership", "plan"]).length > 0;
+    containsAny(lower, [
+      "cancel anytime",
+      "monthly plan",
+      "annual plan",
+      "membership plan",
+      "billing period",
+      "subscription renews",
+      "membership renews"
+    ]).length > 0;
 
   return {
     banking,

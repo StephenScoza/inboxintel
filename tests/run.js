@@ -281,6 +281,20 @@ const tests = [
     }
   },
   {
+    name: "does not classify streaming promos as shipping from shipment wording alone",
+    run() {
+      const result = evaluateEmail({
+        subject: "What to stream this week",
+        plainTextBody: "Your streaming lineup is here. Discover what to watch this week and start your next binge.",
+        senderDomain: "email.peacocktv.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.ORDER_OR_SHIPPING);
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
     name: "classifies tax product surveys as product or newsletter",
     run() {
       const result = evaluateEmail({
@@ -439,6 +453,21 @@ const tests = [
     }
   },
   {
+    name: "does not classify rewards marketing as account security from suspicious activity copy",
+    run() {
+      const result = evaluateEmail({
+        subject: "Last chance: Refer friends to credit score monitoring to earn $15 in rewards points",
+        plainTextBody:
+          "Earn rewards points when you refer friends. Learn how to spot suspicious activity and protect your score.",
+        senderDomain: "m.sofi.org",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.ACCOUNT_SECURITY);
+      assert.equal(result.classification.category, Category.BANKING);
+    }
+  },
+  {
     name: "classifies pickup ready notices as order or shipping",
     run() {
       const result = evaluateEmail({
@@ -505,6 +534,22 @@ const tests = [
     }
   },
   {
+    name: "does not classify optical promos as government from medicare footer copy",
+    run() {
+      const result = evaluateEmail({
+        subject: "Don't forget: Contact Lens Deal Days are here",
+        plainTextBody:
+          "Save on contact lenses this week. Shop now for deals and vision essentials. Medicare and Medicaid accepted in select locations.",
+        senderDomain: "e.targetoptical.com",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://targetoptical.example/unsubscribe", domain: "targetoptical.example", text: "unsubscribe" }]
+      });
+
+      assert.notEqual(result.classification.category, Category.GOVERNMENT);
+      assert.ok([Category.RETAIL_PROMO, Category.SHOPPING].includes(result.classification.category));
+    }
+  },
+  {
     name: "classifies promo discount emails as retail promo",
     run() {
       const result = evaluateEmail({
@@ -557,6 +602,19 @@ const tests = [
     }
   },
   {
+    name: "classifies education fundraising from .edu senders",
+    run() {
+      const result = evaluateEmail({
+        subject: "Support Civil & Environmental Engineering!",
+        plainTextBody: "Join Giving Day and support students, alumni, and the department.",
+        senderDomain: "lehigh.edu"
+      });
+
+      assert.equal(result.classification.category, Category.EDUCATION);
+      assert.notEqual(result.classification.category, Category.UNKNOWN);
+    }
+  },
+  {
     name: "prefers banking over newsletter fallback for transactional finance mail",
     run() {
       const result = evaluateEmail({
@@ -567,6 +625,21 @@ const tests = [
 
       assert.equal(result.classification.category, Category.BANKING);
       assert.notEqual(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "does not classify cashback promos as subscriptions from footer language",
+    run() {
+      const result = evaluateEmail({
+        subject: "Your money is in the bank",
+        plainTextBody:
+          "Cash back is ready. Shop new gift card offers and earn more rewards. Manage your email preferences anytime.",
+        senderDomain: "support.topcashback.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.notEqual(result.classification.category, Category.SUBSCRIPTION);
+      assert.equal(result.classification.category, Category.SHOPPING);
     }
   },
   {

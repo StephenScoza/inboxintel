@@ -9,6 +9,7 @@ export interface GmailMessagePage {
 
 interface FetchOptions {
   maxPages?: number;
+  pageOffset?: number;
   pageSize?: number;
   query?: string;
 }
@@ -38,8 +39,10 @@ export async function *fetchEmailsInPages(
   options: FetchOptions = {}
 ): AsyncGenerator<GmailMessagePage> {
   const pageSize = options.pageSize ?? config.gmailPageSize;
+  const pageOffset = Math.max(0, options.pageOffset ?? 0);
   let pageToken: string | undefined;
-  let pageCount = 0;
+  let scannedPageCount = 0;
+  let yieldedPageCount = 0;
 
   do {
     const listResponse = await gmail.users.messages.list({
@@ -64,14 +67,17 @@ export async function *fetchEmailsInPages(
       }
     }
 
-    yield {
-      nextPageToken: listResponse.data.nextPageToken ?? undefined,
-      messages: fullMessages
-    };
+    if (scannedPageCount >= pageOffset) {
+      yield {
+        nextPageToken: listResponse.data.nextPageToken ?? undefined,
+        messages: fullMessages
+      };
+      yieldedPageCount += 1;
+    }
 
     pageToken = listResponse.data.nextPageToken ?? undefined;
-    pageCount += 1;
-  } while (pageToken && (!options.maxPages || pageCount < options.maxPages));
+    scannedPageCount += 1;
+  } while (pageToken && (!options.maxPages || yieldedPageCount < options.maxPages));
 }
 
 export async function *fetchHistoryInPages(
@@ -80,8 +86,10 @@ export async function *fetchHistoryInPages(
   options: Omit<FetchOptions, "query"> = {}
 ): AsyncGenerator<GmailMessagePage> {
   const pageSize = options.pageSize ?? config.gmailPageSize;
+  const pageOffset = Math.max(0, options.pageOffset ?? 0);
   let pageToken: string | undefined;
-  let pageCount = 0;
+  let scannedPageCount = 0;
+  let yieldedPageCount = 0;
 
   do {
     let historyResponse;
@@ -122,13 +130,16 @@ export async function *fetchHistoryInPages(
       }
     }
 
-    yield {
-      historyId: historyResponse.data.historyId ?? undefined,
-      nextPageToken: historyResponse.data.nextPageToken ?? undefined,
-      messages
-    };
+    if (scannedPageCount >= pageOffset) {
+      yield {
+        historyId: historyResponse.data.historyId ?? undefined,
+        nextPageToken: historyResponse.data.nextPageToken ?? undefined,
+        messages
+      };
+      yieldedPageCount += 1;
+    }
 
     pageToken = historyResponse.data.nextPageToken ?? undefined;
-    pageCount += 1;
-  } while (pageToken && (!options.maxPages || pageCount < options.maxPages));
+    scannedPageCount += 1;
+  } while (pageToken && (!options.maxPages || yieldedPageCount < options.maxPages));
 }

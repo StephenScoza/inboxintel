@@ -14,7 +14,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function runIngestOnce(maxPages?: number, forceFullSync = false) {
+export async function runIngestOnce(maxPages?: number, forceFullSync = false, pageOffset?: number) {
   const client = await getAuthorizedGmailClient();
   const existingAccount = await prisma.gmailAccount.findUnique({
     where: { email: client.emailAddress }
@@ -73,9 +73,9 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false) {
   try {
     if (existingAccount?.historyId && !forceFullSync) {
       usedIncrementalSync = true;
-      await processPages(fetchHistoryInPages(client.gmail, existingAccount.historyId, { maxPages }));
+      await processPages(fetchHistoryInPages(client.gmail, existingAccount.historyId, { maxPages, pageOffset }));
     } else {
-      await processPages(fetchEmailsInPages(client.gmail, { maxPages }));
+      await processPages(fetchEmailsInPages(client.gmail, { maxPages, pageOffset }));
     }
   } catch (error) {
     if (!(error instanceof GmailHistoryExpiredError)) {
@@ -87,9 +87,10 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false) {
 
     usedIncrementalSync = false;
     logger.warn("Gmail history expired, falling back to full mailbox sync", {
-      existingHistoryId: existingAccount?.historyId ?? null
+      existingHistoryId: existingAccount?.historyId ?? null,
+      pageOffset: pageOffset ?? 0
     });
-    await processPages(fetchEmailsInPages(client.gmail, { maxPages }));
+    await processPages(fetchEmailsInPages(client.gmail, { maxPages, pageOffset }));
   }
 
   await prisma.gmailAccount.update({
@@ -105,15 +106,18 @@ export async function runIngestOnce(maxPages?: number, forceFullSync = false) {
     mode: modeLabel,
     processed,
     duplicates,
-    pageCount
+    pageCount,
+    pageOffset: pageOffset ?? 0
   });
-  console.log(`Ingest complete via ${modeLabel}. New emails: ${processed}. Duplicates skipped: ${duplicates}.`);
+  console.log(
+    `Ingest complete via ${modeLabel}. New emails: ${processed}. Duplicates skipped: ${duplicates}. Pages processed: ${pageCount}. Page offset: ${pageOffset ?? 0}.`
+  );
 }
 
-async function runWorkerLoop(maxPages?: number, forceFullSync = false) {
+async function runWorkerLoop(maxPages?: number, forceFullSync = false, pageOffset?: number) {
   while (true) {
     try {
-      await runIngestOnce(maxPages, forceFullSync);
+      await runIngestOnce(maxPages, forceFullSync, pageOffset);
     } catch (error) {
       logger.error("Worker iteration failed", {
         error: error instanceof Error ? error.message : "Unknown worker error"
@@ -129,10 +133,14 @@ async function runWorkerLoop(maxPages?: number, forceFullSync = false) {
 if (require.main === module) {
   const maxPagesFlag = process.argv.find((arg) => arg.startsWith("--max-pages="));
   const maxPages = maxPagesFlag ? Number(maxPagesFlag.split("=")[1]) : undefined;
+  const pageOffsetFlag = process.argv.find((arg) => arg.startsWith("--page-offset="));
+  const pageOffset = pageOffsetFlag ? Number(pageOffsetFlag.split("=")[1]) : undefined;
   const loop = process.argv.includes("--loop");
   const forceFullSync = process.argv.includes("--full-sync");
 
-  const runner = loop ? runWorkerLoop(maxPages, forceFullSync) : runIngestOnce(maxPages, forceFullSync);
+  const runner = loop
+    ? runWorkerLoop(maxPages, forceFullSync, pageOffset)
+    : runIngestOnce(maxPages, forceFullSync, pageOffset);
   runner
     .catch((error) => {
       console.error(error);

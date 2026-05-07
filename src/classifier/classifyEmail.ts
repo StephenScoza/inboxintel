@@ -191,6 +191,14 @@ function isGovernmentDomain(senderDomain: string | null): boolean {
   );
 }
 
+function isEducationDomain(senderDomain: string | null): boolean {
+  if (!senderDomain) {
+    return false;
+  }
+
+  return senderDomain === "edu" || senderDomain.endsWith(".edu");
+}
+
 function detectJobSubjectSignals(subject: string | null): string[] {
   if (!subject) {
     return [];
@@ -225,7 +233,9 @@ function detectEducationEventSignals(text: string): string[] {
     "peer learning",
     "virtual registration",
     "continuing education",
-    "conference registration"
+    "conference registration",
+    "giving day",
+    "support students"
   ]);
 }
 
@@ -380,7 +390,8 @@ function filterSecurityMatches(
     const context = match.context.toLowerCase();
 
     if (match.phrase === "suspicious activity") {
-      return hasAnyKeyword(context, [
+      const looksLikeRealSecurityAlert =
+        hasAnyKeyword(context, [
         "suspicious activity on your account",
         "account alert",
         "sign-in",
@@ -390,7 +401,22 @@ function filterSecurityMatches(
         "fraud",
         "security alert",
         "unrecognized"
-      ]) || hasAnyKeyword(subjectText, ["security alert", "suspicious activity", "account alert", "login attempt"]);
+        ]) || hasAnyKeyword(subjectText, ["security alert", "suspicious activity", "account alert", "login attempt"]);
+      const looksLikeMarketing = hasAnyKeyword(context, [
+        "refer friends",
+        "rewards points",
+        "earn $",
+        "last chance",
+        "bonus",
+        "upgrade your savings",
+        "credit score monitoring"
+      ]) || hasAnyKeyword(subjectText, ["refer friends", "rewards", "bonus", "upgrade your savings"]);
+
+      if (likelyMarketing && looksLikeMarketing) {
+        return false;
+      }
+
+      return looksLikeRealSecurityAlert;
     }
 
     if (match.phrase === "payment scams") {
@@ -444,10 +470,40 @@ function filterSubscriptionMatches(
     }
 
     if (match.phrase === "subscription") {
-      return true;
+      return hasAnyKeyword(context, [
+        "subscription renew",
+        "subscription fee",
+        "subscription billed",
+        "subscription charge",
+        "subscription plan",
+        "manage subscription",
+        "cancel subscription",
+        "your subscription"
+      ]);
     }
 
-    return !(likelyMarketing && commerceSender && hasAnyKeyword(context, ["reward", "badge", "status update"]));
+    return !(
+      likelyMarketing &&
+      commerceSender &&
+      hasAnyKeyword(context, ["reward", "badge", "status update", "cash back", "shop", "deal"])
+    );
+  });
+}
+
+function filterShoppingMatches(
+  matches: ExtractedSignals["shopping"],
+  senderDomain: string | null
+): ExtractedSignals["shopping"] {
+  const productSender = isProductNewsletterDomain(senderDomain);
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "lineup" && productSender) {
+      return !hasAnyKeyword(context, ["stream", "watch", "watchlist", "episodes", "titles", "binge"]);
+    }
+
+    return true;
   });
 }
 
@@ -473,6 +529,38 @@ function filterShippingMatches(
 
   return matches.filter((match) => {
     const context = match.context.toLowerCase();
+    if (match.phrase === "shipment") {
+      return (
+        hasPurchaseLabel ||
+        shippingDomain ||
+        hasAnyKeyword(context, [
+          "shipment tracking",
+          "track shipment",
+          "shipment is on the way",
+          "your shipment",
+          "package",
+          "carrier",
+          "tracking number",
+          "order shipment"
+        ])
+      );
+    }
+
+    if (match.phrase === "shipped") {
+      return (
+        hasPurchaseLabel ||
+        shippingDomain ||
+        hasAnyKeyword(context, [
+          "your order has shipped",
+          "item has shipped",
+          "package shipped",
+          "shipped to",
+          "tracking number",
+          "order details"
+        ])
+      );
+    }
+
     if (match.phrase === "tracking") {
       return (
         hasPurchaseLabel ||
@@ -509,6 +597,69 @@ function filterShippingMatches(
         "mailpiece"
       ])
     );
+  });
+}
+
+function filterGovernmentMatches(
+  matches: ExtractedSignals["government"],
+  senderDomain: string | null,
+  likelyMarketing: boolean
+): ExtractedSignals["government"] {
+  const governmentSender = isGovernmentDomain(senderDomain);
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "medicare" || match.phrase === "medicaid") {
+      if (governmentSender) {
+        return true;
+      }
+
+      return hasAnyKeyword(context, [
+        "coverage",
+        "benefits",
+        "enrollment",
+        "provider",
+        "insurance plan",
+        "health plan"
+      ]) && !likelyMarketing;
+    }
+
+    if (match.phrase === "irs" || match.phrase === "state tax" || match.phrase === "tax refund") {
+      return governmentSender || hasAnyKeyword(context, ["tax return", "tax filing", "refund status", "irs"]);
+    }
+
+    return true;
+  });
+}
+
+function filterTravelMatches(
+  matches: ExtractedSignals["travel"],
+  senderDomain: string | null,
+  likelyMarketing: boolean
+): ExtractedSignals["travel"] {
+  const travelSender = isTravelDomain(senderDomain);
+
+  return matches.filter((match) => {
+    const context = match.context.toLowerCase();
+
+    if (match.phrase === "rental" || match.phrase === "reservation") {
+      return travelSender || hasAnyKeyword(context, [
+        "car rental",
+        "hotel reservation",
+        "flight reservation",
+        "travel itinerary",
+        "pickup location",
+        "drop-off",
+        "airport"
+      ]);
+    }
+
+    if (match.phrase === "trip") {
+      return !likelyMarketing || travelSender || hasAnyKeyword(context, ["travel", "vacation", "itinerary", "flight"]);
+    }
+
+    return true;
   });
 }
 
@@ -577,6 +728,11 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     input.senderDomain,
     input.signals.likelyMarketing
   );
+  const filteredGovernmentMatches = filterGovernmentMatches(
+    input.signals.government,
+    input.senderDomain,
+    input.signals.likelyMarketing
+  );
   const filteredSecurityMatches = filterSecurityMatches(
     input.signals.security,
     input.senderDomain,
@@ -584,28 +740,34 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     input.subject
   );
   const filteredShippingMatches = filterShippingMatches(input.signals.shipping, input.labels, input.senderDomain);
+  const filteredShoppingMatches = filterShoppingMatches(input.signals.shopping, input.senderDomain);
   const filteredSubscriptionMatches = filterSubscriptionMatches(
     input.signals.subscription,
     input.senderDomain,
     input.signals.likelyMarketing
   );
+  const filteredTravelMatches = filterTravelMatches(
+    input.signals.travel,
+    input.senderDomain,
+    input.signals.likelyMarketing
+  );
   const bankingHits = filteredBankingMatches.map((match) => match.phrase);
   const billHits = input.signals.bill.map((match) => match.phrase);
-  const travelHits = input.signals.travel.map((match) => match.phrase);
+  const travelHits = filteredTravelMatches.map((match) => match.phrase);
   const jobHits = input.signals.job.map((match) => match.phrase);
   const jobSubjectHits = detectJobSubjectSignals(input.subject);
   const strongJobSignal =
     jobSubjectHits.length > 0 ||
     (jobHits.length > 0 && (jobSubjectHits.length > 0 || isJobPlatformDomain(input.senderDomain)));
   const healthcareHits = input.signals.healthcare.map((match) => match.phrase);
-  const governmentHits = input.signals.government.map((match) => match.phrase);
+  const governmentHits = filteredGovernmentMatches.map((match) => match.phrase);
   const educationHits = filteredEducationMatches.map((match) => match.phrase);
   const educationEventHits = detectEducationEventSignals(combinedText);
   const strongEducationSignal = educationHits.length > 0 || educationEventHits.length >= 2;
   const socialHits = input.signals.social.map((match) => match.phrase);
   const newsletterHits = input.signals.newsletter.map((match) => match.phrase);
   const smsHits = input.signals.sms.map((match) => match.phrase);
-  const shoppingHits = input.signals.shopping.map((match) => match.phrase);
+  const shoppingHits = filteredShoppingMatches.map((match) => match.phrase);
   const freeTrialHits = filteredFreeTrialMatches.map((match) => match.phrase);
   const renewalHits = input.signals.renewal.map((match) => match.phrase);
   const receiptHits = filteredReceiptMatches.map((match) => match.phrase);
@@ -662,6 +824,19 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const likelyGovernmentFallback =
     isGovernmentDomain(input.senderDomain) &&
     hasAnyKeyword(combinedText, ["identity history", "summary request", "fingerprint", "identity request"]);
+  const likelyEducationFallback =
+    isEducationDomain(input.senderDomain) &&
+    hasAnyKeyword(combinedText, [
+      "university",
+      "college",
+      "student",
+      "campus",
+      "alumni",
+      "giving day",
+      "financial aid",
+      "department",
+      "engineering"
+    ]);
   const likelyMarketplaceFallback =
     input.senderDomain !== null &&
     (input.senderDomain === "members.ebay.com" || input.senderDomain.endsWith(".members.ebay.com")) &&
@@ -733,7 +908,14 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     subscriptionHits.length > 0 ||
     freeTrialHits.length > 0 ||
     renewalHits.length > 0 ||
-    hasAnyKeyword(combinedText, ["cancel anytime", "monthly", "annual", "billing period", "monthly plan", "annual plan"]);
+    hasAnyKeyword(combinedText, [
+      "cancel anytime",
+      "billing period",
+      "monthly plan",
+      "annual plan",
+      "subscription renews",
+      "membership renews"
+    ]);
 
   const reasons: string[] = [];
   let category: Category = Category.UNKNOWN;
@@ -857,9 +1039,16 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 62;
     opportunityScore = 12;
     confidence = 82;
-  } else if (strongEducationSignal && !(input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") && isCommerceDomain(input.senderDomain) && educationEventHits.length === 0)) {
+  } else if (
+    (strongEducationSignal || likelyEducationFallback) &&
+    !(input.signals.labelSignals.includes("CATEGORY_PROMOTIONS") && isCommerceDomain(input.senderDomain) && educationEventHits.length === 0)
+  ) {
     category = Category.EDUCATION;
-    reasons.push(`Matched education signals: ${dedupePhrases([...educationHits, ...educationEventHits]).join(", ")}`);
+    reasons.push(
+      strongEducationSignal
+        ? `Matched education signals: ${dedupePhrases([...educationHits, ...educationEventHits]).join(", ")}`
+        : `Matched education sender fallback: ${input.senderDomain}`
+    );
     urgencyScore = 45;
     opportunityScore = 18;
     confidence = 81;
