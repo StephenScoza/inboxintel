@@ -178,6 +178,7 @@ Or target the exact slice you are tuning:
 ```bash
 docker compose exec app npm run reprocess -- --account=you@example.com --category=UNKNOWN --limit=100
 docker compose exec app npm run reprocess -- --sender-domain=amazon.com --limit=50
+docker compose exec app npm run reprocess -- --email-id=cmotiq6im05x6pj66x3jpf98h
 ```
 
 The reprocess job refreshes stored extracted amounts, extracted dates, classifications, subscription facts, and creates any newly eligible alerts that do not already exist for an email.

@@ -150,6 +150,47 @@ interface ReprocessOptions {
   accountEmail?: string;
   category?: Category;
   senderDomain?: string;
+  emailId?: string;
+}
+
+async function persistClassificationForReprocess(params: {
+  emailId: string;
+  classification: ReturnType<typeof buildEmailIntelligence>["classification"];
+  intelligence: ReturnType<typeof buildEmailIntelligence>;
+}) {
+  const payload = {
+    category: params.classification.category,
+    confidence: params.classification.confidence,
+    urgencyScore: params.classification.urgencyScore,
+    opportunityScore: params.classification.opportunityScore,
+    reasons: params.classification.reasons,
+    signalsJson: sanitizeJsonValue(buildPersistedClassificationSignals(params.intelligence)) as unknown as Prisma.InputJsonValue
+  };
+
+  await prisma.classification.upsert({
+    where: {
+      emailId: params.emailId
+    },
+    update: payload,
+    create: {
+      emailId: params.emailId,
+      ...payload
+    }
+  });
+
+  const stored = await prisma.classification.findUnique({
+    where: {
+      emailId: params.emailId
+    },
+    select: {
+      category: true,
+      confidence: true,
+      urgencyScore: true,
+      opportunityScore: true
+    }
+  });
+
+  return stored;
 }
 
 export async function runReprocess(options: ReprocessOptions = {}) {
@@ -163,6 +204,7 @@ export async function runReprocess(options: ReprocessOptions = {}) {
           }
         : {}),
       ...(options.senderDomain ? { senderDomain: options.senderDomain } : {}),
+      ...(options.emailId ? { id: options.emailId } : {}),
       ...(options.category
         ? {
             classification: {
@@ -249,28 +291,45 @@ export async function runReprocess(options: ReprocessOptions = {}) {
     try {
       let usedClassificationFallback = false;
       try {
-        await prisma.classification.upsert({
-          where: {
-            emailId: email.id
-          },
-          update: {
-            category: intelligence.classification.category,
-            confidence: intelligence.classification.confidence,
-            urgencyScore: intelligence.classification.urgencyScore,
-            opportunityScore: intelligence.classification.opportunityScore,
-            reasons: intelligence.classification.reasons,
-            signalsJson: sanitizeJsonValue(buildPersistedClassificationSignals(intelligence)) as unknown as Prisma.InputJsonValue
-          },
-          create: {
-            emailId: email.id,
-            category: intelligence.classification.category,
-            confidence: intelligence.classification.confidence,
-            urgencyScore: intelligence.classification.urgencyScore,
-            opportunityScore: intelligence.classification.opportunityScore,
-            reasons: intelligence.classification.reasons,
-            signalsJson: sanitizeJsonValue(buildPersistedClassificationSignals(intelligence)) as unknown as Prisma.InputJsonValue
-          }
+        const stored = await persistClassificationForReprocess({
+          emailId: email.id,
+          classification: intelligence.classification,
+          intelligence
         });
+
+        if (
+          !stored ||
+          stored.category !== intelligence.classification.category ||
+          stored.confidence !== intelligence.classification.confidence ||
+          stored.urgencyScore !== intelligence.classification.urgencyScore ||
+          stored.opportunityScore !== intelligence.classification.opportunityScore
+        ) {
+          logger.warn("Reprocess classification verify mismatch, retrying once", {
+            emailId: email.id,
+            gmailMessageId: email.gmailMessageId,
+            expectedCategory: intelligence.classification.category,
+            storedCategory: stored?.category ?? null
+          });
+
+          const retried = await persistClassificationForReprocess({
+            emailId: email.id,
+            classification: intelligence.classification,
+            intelligence
+          });
+
+          if (
+            !retried ||
+            retried.category !== intelligence.classification.category ||
+            retried.confidence !== intelligence.classification.confidence ||
+            retried.urgencyScore !== intelligence.classification.urgencyScore ||
+            retried.opportunityScore !== intelligence.classification.opportunityScore
+          ) {
+            throw new Error(
+              `Classification verify mismatch for ${email.id}: expected ${intelligence.classification.category}, stored ${retried?.category ?? "missing"}`
+            );
+          }
+        }
+
         await Promise.all([
           resolveParseIssuesForMessage({
             gmailMessageId: email.gmailMessageId,
@@ -573,12 +632,15 @@ if (require.main === module) {
     : undefined;
   const senderDomainFlag = process.argv.find((arg) => arg.startsWith("--sender-domain="));
   const senderDomain = senderDomainFlag ? senderDomainFlag.split("=")[1] : undefined;
+  const emailIdFlag = process.argv.find((arg) => arg.startsWith("--email-id="));
+  const emailId = emailIdFlag ? emailIdFlag.split("=")[1] : undefined;
 
   runReprocess({
     limit,
     accountEmail,
     category,
-    senderDomain
+    senderDomain,
+    emailId
   })
     .catch((error) => {
       console.error(error);
