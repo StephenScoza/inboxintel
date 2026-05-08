@@ -1033,6 +1033,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   const directPersonalForwardFallback =
     input.labels.includes("CATEGORY_PERSONAL") &&
     (input.subject?.toLowerCase().startsWith("fw:") || input.subject?.toLowerCase().startsWith("fwd:") || false);
+  const directPersonalLabelFallback =
+    input.labels.includes("CATEGORY_PERSONAL") &&
+    !input.signals.likelyMarketing;
+  const directSentPersonalFallback =
+    input.labels.includes("SENT") &&
+    !input.signals.likelyMarketing;
   const directRetailPromoDomainFallback =
     input.senderDomain !== null &&
     (
@@ -1367,16 +1373,22 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     confidence = 82;
   } else if (input.senderDomain && /gmail\.com|yahoo\.com|outlook\.com|hotmail\.com|live\.com|msn\.com|icloud\.com/i.test(input.senderDomain)) {
     category = Category.PERSONAL;
-    reasons.push("Sender uses a common personal mailbox domain.");
+    reasons.push(
+      directPersonalLabelFallback
+        ? "Sender uses a common personal mailbox domain and Gmail labeled it personal."
+        : directSentPersonalFallback
+          ? "Sender uses a common personal mailbox domain and the email is from the Sent mailbox."
+        : "Sender uses a common personal mailbox domain."
+    );
     urgencyScore = 15;
     opportunityScore = 10;
-    confidence = 60;
+    confidence = directPersonalLabelFallback ? 74 : directSentPersonalFallback ? 72 : 68;
   } else if (directPersonalForwardFallback) {
     category = Category.PERSONAL;
     reasons.push("Gmail marked this as personal and the subject looks like a forwarded conversation.");
     urgencyScore = 18;
     opportunityScore = 10;
-    confidence = 68;
+    confidence = 76;
   } else {
     reasons.push("No strong deterministic rule matched.");
   }
