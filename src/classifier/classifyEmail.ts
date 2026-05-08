@@ -265,6 +265,7 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "homedepot.com",
     "ihop.com",
     "liquid-iv.com",
+    "targetoptical.com",
     "snipesusa.com",
     "topcashback.com",
     "panerabread.com",
@@ -287,6 +288,8 @@ function isCommerceDomain(senderDomain: string | null): boolean {
     "umzu.com",
     "taylorswift.com",
     "ebay.com",
+    "ericemanuel.com",
+    "curaleaf.com",
     "alias.org",
     "travisscott.com",
     "corteiz.com",
@@ -323,7 +326,7 @@ function isHealthcareDomain(senderDomain: string | null): boolean {
     "umzu.com",
     "optum.com",
     "cvs.com",
-    "zennioptical.com"
+    "plannedparenthood.org"
   ].some((domain) => senderDomain === domain || senderDomain.endsWith(`.${domain}`));
 }
 
@@ -973,6 +976,71 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
       input.senderDomain.endsWith(".alexa.com")
     ) &&
     hasAnyKeyword(combinedText, ["alexa+", "partner with alexa", "browser", "unlimited access"]);
+  const directStreamingPromoFallback =
+    input.senderDomain !== null &&
+    (
+      input.senderDomain.endsWith(".pluto.tv") ||
+      input.senderDomain.endsWith(".xfinity.com")
+    ) &&
+    (
+      input.signals.likelyMarketing ||
+      hasAnyKeyword(combinedText, ["movies", "tv", "stream", "watch", "multiview", "fan view", "odds zone", "nba"])
+    );
+  const directUberSecurityFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "uber.com" || input.senderDomain.endsWith(".uber.com")) &&
+    (
+      hasAnyKeyword(combinedText, ["new device sign-in", "signed into from a new device", "sign-in country", "sign-in city"]) ||
+      (input.subject?.toLowerCase().includes("sign-in") ?? false)
+    );
+  const directExperianSecurityFallback =
+    input.senderDomain !== null &&
+    input.senderDomain.endsWith(".experian.com") &&
+    (
+      hasAnyKeyword(combinedText, ["dark web", "your info exposed", "we found your info"]) ||
+      (input.subject?.toLowerCase().includes("dark web") ?? false)
+    );
+  const directFirecrawlSignupFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "firecrawl.dev" || input.senderDomain.endsWith(".firecrawl.dev")) &&
+    (
+      hasAnyKeyword(combinedText, ["confirm your signup", "confirm your email", "verify", "auth/callback"]) ||
+      (input.subject?.toLowerCase().includes("confirm your signup") ?? false)
+    );
+  const directFirecrawlProductFallback =
+    input.senderDomain !== null &&
+    (input.senderDomain === "firecrawl.dev" || input.senderDomain.endsWith(".firecrawl.dev")) &&
+    (
+      input.signals.likelyMarketing ||
+      hasAnyKeyword(combinedText, ["get the most out of firecrawl", "search results", "scrape", "crawl", "api", "features"])
+    );
+  const directIntuitPromoFallback =
+    input.senderDomain !== null &&
+    input.senderDomain.endsWith(".intuit.com") &&
+    (
+      input.signals.likelyMarketing ||
+      hasAnyKeyword(combinedText, ["fun facts", "trivia game", "trivia facts", "play this"])
+    );
+  const directSpiritTravelFallback =
+    input.senderDomain !== null &&
+    input.senderDomain.endsWith(".spirit-airlines.com");
+  const directHealthcarePolicyFallback =
+    hasAnyKeyword(combinedText, ["planned parenthood", "ppkeystone", "cost of care", "sliding scale"]) ||
+    (
+      hasAnyKeyword(combinedText, ["medicaid", "patients"]) &&
+      hasAnyKeyword(combinedText, ["important changes", "fee", "fees", "cost", "pricing", "charges"])
+    );
+  const directPersonalForwardFallback =
+    input.labels.includes("CATEGORY_PERSONAL") &&
+    (input.subject?.toLowerCase().startsWith("fw:") || input.subject?.toLowerCase().startsWith("fwd:") || false);
+  const directRetailPromoDomainFallback =
+    input.senderDomain !== null &&
+    (
+      input.senderDomain.endsWith(".curaleaf.com") ||
+      input.senderDomain === "ericemanuel.com" ||
+      input.senderDomain.endsWith(".ericemanuel.com")
+    ) &&
+    input.signals.likelyMarketing;
   const strongFreeTrialSignal =
     freeTrialHits.length > 0 &&
     (renewalHits.length > 0 ||
@@ -1031,9 +1099,13 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
   let confidence = 45;
   const alertTypes = new Set<AlertType>();
 
-  if (strongSecuritySignal) {
+  if (strongSecuritySignal || directUberSecurityFallback || directExperianSecurityFallback || directFirecrawlSignupFallback) {
     category = Category.ACCOUNT_SECURITY;
-    reasons.push(`Matched security keywords: ${securityHits.join(", ")}`);
+    reasons.push(
+      directUberSecurityFallback || directExperianSecurityFallback || directFirecrawlSignupFallback
+        ? `Matched security sender fallback: ${input.senderDomain}`
+        : `Matched security keywords: ${securityHits.join(", ")}`
+    );
     urgencyScore = 90;
     confidence = 92;
     alertTypes.add(AlertType.URGENT_DEADLINE);
@@ -1128,9 +1200,13 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 44;
     opportunityScore = 20;
     confidence = 84;
-  } else if (likelyHealthcareFallback) {
+  } else if (likelyHealthcareFallback || directHealthcarePolicyFallback) {
     category = Category.HEALTHCARE;
-    reasons.push(`Matched healthcare sender fallback: ${input.senderDomain}`);
+    reasons.push(
+      directHealthcarePolicyFallback
+        ? "Matched healthcare policy-change context."
+        : `Matched healthcare sender fallback: ${input.senderDomain}`
+    );
     urgencyScore = 40;
     opportunityScore = 18;
     confidence = 78;
@@ -1246,22 +1322,34 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = category === Category.RETAIL_PROMO ? 14 : 24;
     opportunityScore = category === Category.RETAIL_PROMO ? 24 : 38;
     confidence = 76;
+  } else if (directRetailPromoDomainFallback) {
+    category = Category.RETAIL_PROMO;
+    reasons.push(`Matched retail promo sender fallback: ${input.senderDomain}`);
+    urgencyScore = 14;
+    opportunityScore = 24;
+    confidence = 76;
   } else if (strongSocialSignal) {
     category = Category.SOCIAL_OR_COMMUNITY;
     reasons.push(`Matched social or community signals: ${dedupePhrases(socialHits).join(", ") || input.senderDomain || "social sender"}`);
     urgencyScore = 28;
     opportunityScore = 24;
     confidence = 84;
-  } else if (strongNewsletterSignal || directAlexaFallback) {
+  } else if (strongNewsletterSignal || directAlexaFallback || directStreamingPromoFallback || directFirecrawlProductFallback || directIntuitPromoFallback) {
     category = Category.PRODUCT_OR_NEWSLETTER;
     reasons.push(
-      directAlexaFallback
-        ? `Matched product-access sender fallback: ${input.senderDomain}`
+      directAlexaFallback || directStreamingPromoFallback || directFirecrawlProductFallback || directIntuitPromoFallback
+        ? `Matched product sender fallback: ${input.senderDomain}`
         : `Matched newsletter or product update signals: ${dedupePhrases(newsletterHits).join(", ") || input.senderDomain || "product sender"}`
     );
     urgencyScore = 20;
     opportunityScore = input.signals.likelyMarketing ? 30 : 18;
     confidence = 80;
+  } else if (directSpiritTravelFallback) {
+    category = Category.TRAVEL;
+    reasons.push(`Matched airline sender fallback: ${input.senderDomain}`);
+    urgencyScore = 28;
+    opportunityScore = 18;
+    confidence = 78;
   } else if (directOneDriveMemoryFallback || likelyProductDomainFallback) {
     category = Category.PRODUCT_OR_NEWSLETTER;
     reasons.push(`Matched product sender fallback: ${input.senderDomain}`);
@@ -1283,6 +1371,12 @@ export function classifyEmail(input: ClassificationInput): ClassificationResult 
     urgencyScore = 15;
     opportunityScore = 10;
     confidence = 60;
+  } else if (directPersonalForwardFallback) {
+    category = Category.PERSONAL;
+    reasons.push("Gmail marked this as personal and the subject looks like a forwarded conversation.");
+    urgencyScore = 18;
+    opportunityScore = 10;
+    confidence = 68;
   } else {
     reasons.push("No strong deterministic rule matched.");
   }

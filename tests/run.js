@@ -1110,6 +1110,163 @@ const tests = [
     }
   },
   {
+    name: "classifies Xfinity sports promos as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Experience NBA action like never before",
+        plainTextBody: "With Xfinity TV service, enjoy Multiview, Fan View, Odds Zone, and more.",
+        senderDomain: "updates.xfinity.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies Uber new device sign-ins as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "New device sign-in",
+        plainTextBody: "Your Uber account has been signed into from a new device. Sign-in country: United States.",
+        senderDomain: "uber.com"
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
+    }
+  },
+  {
+    name: "classifies Planned Parenthood fee notices as healthcare",
+    run() {
+      const result = evaluateEmail({
+        subject: "Important changes to our fees",
+        plainTextBody:
+          "Planned Parenthood lost funding that helped cover the cost of care. We are no longer able to see patients insured through Medicaid.",
+        senderDomain: "shared1.ccsend.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.HEALTHCARE);
+    }
+  },
+  {
+    name: "classifies Firecrawl signup confirmations as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "Confirm Your Signup - Firecrawl",
+        plainTextBody: "Welcome to Firecrawl. Click below to confirm your email and complete signup.",
+        senderDomain: "auth.firecrawl.dev"
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
+    }
+  },
+  {
+    name: "classifies Firecrawl onboarding promos as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Get the most out of Firecrawl",
+        plainTextBody: "We'll show you scrape, crawl, search, API, and feature guides over the next few days.",
+        senderDomain: "firecrawl.dev",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies Firecrawl api promos from the root domain as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "Search results (and content) delivered via API",
+        plainTextBody:
+          "Our Search endpoint returns Google search results and scrapes the full content in one API call. You can unsubscribe from these emails.",
+        senderDomain: "firecrawl.dev",
+        labels: ["CATEGORY_PROMOTIONS"],
+        links: [{ url: "https://track.customer.io/unsubscribe/example", domain: "track.customer.io", text: "unsubscribe" }]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies Experian dark web alerts as account security",
+    run() {
+      const result = evaluateEmail({
+        subject: "We found your info on the dark web, Stephen",
+        plainTextBody: "We found your info exposed on the dark web. Sign in to review the results.",
+        senderDomain: "e.usa.experian.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.ACCOUNT_SECURITY);
+    }
+  },
+  {
+    name: "classifies Spirit promo mail as travel",
+    run() {
+      const result = evaluateEmail({
+        subject: "Stephen, want 400 Free Spirit points?",
+        plainTextBody: "Enjoy a little points boost and more perks with Free Spirit.",
+        senderDomain: "save.spirit-airlines.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.TRAVEL);
+    }
+  },
+  {
+    name: "classifies Curaleaf marketing as retail promo",
+    run() {
+      const result = evaluateEmail({
+        subject: "Connected Has Arrived in Pennsylvania",
+        plainTextBody: "A new standard of quality is here. Stock up now and unsubscribe any time.",
+        senderDomain: "info.curaleaf.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
+    name: "classifies Intuit trivia promotions as product or newsletter",
+    run() {
+      const result = evaluateEmail({
+        subject: "You won't believe these wild trivia facts",
+        plainTextBody: "Play this Fun Facts trivia game now. Sign in to learn more.",
+        senderDomain: "em1.turbotax.intuit.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.PRODUCT_OR_NEWSLETTER);
+    }
+  },
+  {
+    name: "classifies forwarded personal housing threads as personal when Gmail labels them personal",
+    run() {
+      const result = evaluateEmail({
+        subject: "Fw: FW: 1225",
+        plainTextBody: "Please see attached. This is required to be returned by 4/1/2026. Once the notice paperwork is processed, you will receive move out instructions.",
+        senderDomain: "ajhmanagement.com",
+        labels: ["CATEGORY_PERSONAL", "INBOX"]
+      });
+
+      assert.equal(result.classification.category, Category.PERSONAL);
+    }
+  },
+  {
+    name: "classifies Eric Emanuel store notices as retail promo",
+    run() {
+      const result = evaluateEmail({
+        subject: "SNOW DAY",
+        plainTextBody: "Store closed today. EE New York. Unsubscribe.",
+        senderDomain: "ericemanuel.com",
+        labels: ["CATEGORY_PROMOTIONS"]
+      });
+
+      assert.equal(result.classification.category, Category.RETAIL_PROMO);
+    }
+  },
+  {
     name: "classifies generic order ready for pickup mail as shipping",
     run() {
       const result = evaluateEmail({
