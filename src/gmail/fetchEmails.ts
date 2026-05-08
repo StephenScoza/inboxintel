@@ -23,6 +23,15 @@ export class GmailHistoryExpiredError extends Error {
   }
 }
 
+function isIngestibleMailboxMessage(message: gmail_v1.Schema$Message | null): message is gmail_v1.Schema$Message {
+  if (!message) {
+    return false;
+  }
+
+  const labels = new Set(message.labelIds ?? []);
+  return !labels.has("SPAM") && !labels.has("TRASH");
+}
+
 function extractGoogleStatus(error: unknown): number | undefined {
   if (!error || typeof error !== "object") {
     return undefined;
@@ -80,7 +89,7 @@ export async function *fetchEmailsInPages(
         }
 
         const fullMessage = await fetchMessageById(gmail, messageRef.id);
-        if (fullMessage) {
+        if (isIngestibleMailboxMessage(fullMessage)) {
           fullMessages.push(fullMessage);
         }
       }
@@ -145,7 +154,7 @@ export async function *fetchHistoryInPages(
       const messages: gmail_v1.Schema$Message[] = [];
       for (const messageId of messageIds) {
         const fullMessage = await fetchMessageById(gmail, messageId);
-        if (fullMessage) {
+        if (isIngestibleMailboxMessage(fullMessage)) {
           messages.push(fullMessage);
         }
       }
