@@ -1,11 +1,21 @@
 import express from "express";
-import { Category } from "@prisma/client";
+import { Category, Prisma } from "@prisma/client";
 import { CATEGORY_METADATA, categoryCssClass, categoryFamily } from "../classifier/taxonomy";
 import { config } from "../config";
 import { prisma } from "../db";
 import { buildMailingListInsights } from "../intelligence/mailingListInsights";
 import { buildSenderInsights } from "../intelligence/senderInsights";
 import { buildSubscriptionInsights } from "../intelligence/subscriptionInsights";
+
+function visibleEmailWhere(base: Prisma.EmailWhereInput = {}): Prisma.EmailWhereInput {
+  return {
+    ...base,
+    NOT: [
+      { gmailLabels: { has: "SPAM" } },
+      { gmailLabels: { has: "TRASH" } }
+    ]
+  };
+}
 
 function escapeHtml(value: string | null | undefined): string {
   return (value ?? "")
@@ -602,6 +612,7 @@ export function createWebServer() {
   app.get("/", async (req, res) => {
     const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
     const accountFilter = accountId ? { gmailAccountId: accountId } : {};
+    const visibleAccountFilter = visibleEmailWhere(accountFilter);
     const [
       emailCount,
       senderCount,
@@ -615,13 +626,13 @@ export function createWebServer() {
       highSignalEmails,
       gmailAccounts
     ] = await Promise.all([
-      prisma.email.count({ where: accountFilter }),
+      prisma.email.count({ where: visibleAccountFilter }),
       prisma.sender.count({
         where: accountId
           ? {
               emails: {
                 some: {
-                  gmailAccountId: accountId
+                  ...visibleAccountFilter
                 }
               }
             }
@@ -631,19 +642,22 @@ export function createWebServer() {
       prisma.alert.count({ where: accountFilter }),
       prisma.classification.count({
         where: {
-          email: accountFilter,
+          email: visibleAccountFilter,
           urgencyScore: { gte: 75 }
         }
       }),
       prisma.classification.count({
         where: {
-          email: accountFilter,
+          email: visibleAccountFilter,
           opportunityScore: { gte: 75 }
         }
       }),
       prisma.alert.findMany({
         include: { email: true },
-        where: accountFilter,
+        where: {
+          ...(accountId ? { gmailAccountId: accountId } : {}),
+          email: visibleEmailWhere()
+        },
         orderBy: { createdAt: "desc" },
         take: 6
       }),
@@ -657,7 +671,7 @@ export function createWebServer() {
           ? {
               emails: {
                 some: {
-                  gmailAccountId: accountId
+                  ...visibleAccountFilter
                 }
               }
             }
@@ -665,7 +679,7 @@ export function createWebServer() {
         include: {
           emails: {
             include: { classification: true },
-            where: accountFilter,
+            where: visibleAccountFilter,
             orderBy: { receivedAt: "desc" },
             take: 20
           }
@@ -675,13 +689,13 @@ export function createWebServer() {
       }),
       prisma.email.findMany({
         include: { classification: true },
-        where: {
+        where: visibleEmailWhere({
           ...accountFilter,
           OR: [
             { classification: { urgencyScore: { gte: 75 } } },
             { classification: { opportunityScore: { gte: 75 } } }
           ]
-        },
+        }),
         orderBy: { receivedAt: "desc" },
         take: 8
       }),
@@ -820,11 +834,11 @@ export function createWebServer() {
     const from = typeof req.query.from === "string" ? req.query.from : undefined;
 
     const emails = await prisma.email.findMany({
-      where: {
-        senderEmail: sender ? { contains: sender, mode: "insensitive" } : undefined,
+      where: visibleEmailWhere({
+        senderEmail: sender ? { contains: sender, mode: Prisma.QueryMode.insensitive } : undefined,
         receivedAt: from ? { gte: new Date(from) } : undefined,
         classification: category && category in Category ? { category: category as Category } : undefined
-      },
+      }),
       include: {
         sender: true,
         classification: true
@@ -908,6 +922,11 @@ export function createWebServer() {
     });
 
     if (!email) {
+      res.status(404).send(renderPage("Email Not Found", "<p>Email not found.</p>"));
+      return;
+    }
+
+    if (email.gmailLabels.includes("SPAM") || email.gmailLabels.includes("TRASH")) {
       res.status(404).send(renderPage("Email Not Found", "<p>Email not found.</p>"));
       return;
     }
@@ -1443,6 +1462,7 @@ export function createWebServer() {
   app.get("/analytics", async (req, res) => {
     const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
     const accountFilter = accountId ? { gmailAccountId: accountId } : {};
+    const visibleAccountFilter = visibleEmailWhere(accountFilter);
     const timelineDays = 14;
     const timelineCutoff = new Date(Date.now() - timelineDays * 24 * 60 * 60 * 1000);
 
@@ -1464,7 +1484,7 @@ export function createWebServer() {
     ] = await Promise.all([
       prisma.classification.groupBy({
         where: {
-          email: accountFilter
+          email: visibleAccountFilter
         },
         by: ["category"],
         _count: {
@@ -1486,7 +1506,7 @@ export function createWebServer() {
           ? {
               emails: {
                 some: {
-                  gmailAccountId: accountId
+                  ...visibleAccountFilter
                 }
               }
             }
@@ -1496,7 +1516,7 @@ export function createWebServer() {
             include: {
               classification: true
             },
-            where: accountFilter,
+            where: visibleAccountFilter,
             orderBy: {
               receivedAt: "desc"
             },
@@ -1523,7 +1543,7 @@ export function createWebServer() {
       }),
       prisma.classification.count({
         where: {
-          email: accountFilter,
+          email: visibleAccountFilter,
           urgencyScore: {
             gte: 75
           }
@@ -1531,53 +1551,53 @@ export function createWebServer() {
       }),
       prisma.classification.count({
         where: {
-          email: accountFilter,
+          email: visibleAccountFilter,
           opportunityScore: {
             gte: 75
           }
         }
       }),
       prisma.email.count({
-        where: accountFilter
+        where: visibleAccountFilter
       }),
       prisma.email.count({
-        where: {
+        where: visibleEmailWhere({
           ...accountFilter,
           listUnsubscribe: {
             not: null
           }
-        }
+        })
       }),
       prisma.email.count({
-        where: {
+        where: visibleEmailWhere({
           ...accountFilter,
           authenticationResults: {
             not: null
           }
-        }
+        })
       }),
       prisma.email.count({
-        where: {
+        where: visibleEmailWhere({
           ...accountFilter,
           autoSubmitted: {
             not: null
           }
-        }
+        })
       }),
       prisma.email.aggregate({
-        where: accountFilter,
+        where: visibleAccountFilter,
         _avg: {
           payloadPartCount: true,
           gmailSizeEstimate: true
         }
       }),
       prisma.email.findMany({
-        where: {
+        where: visibleEmailWhere({
           ...accountFilter,
           receivedAt: {
             gte: timelineCutoff
           }
-        },
+        }),
         select: {
           receivedAt: true,
           classification: {
@@ -1590,7 +1610,8 @@ export function createWebServer() {
       }),
       prisma.alert.findMany({
         where: {
-          ...accountFilter,
+          ...(accountId ? { gmailAccountId: accountId } : {}),
+          email: visibleEmailWhere(),
           createdAt: {
             gte: timelineCutoff
           }
@@ -1600,13 +1621,13 @@ export function createWebServer() {
         }
       }),
       prisma.email.findMany({
-        where: {
+        where: visibleEmailWhere({
           ...accountFilter,
           OR: [
             { listId: { not: null } },
             { listUnsubscribe: { not: null } }
           ]
-        },
+        }),
         select: {
           id: true,
           subject: true,
